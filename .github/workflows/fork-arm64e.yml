@@ -1,0 +1,148 @@
+name: Fork arm64e validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/arm64e-darwin-ptrauth-spike
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-arm64e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arm64e:
+    if: github.repository == 'cypherair/rust'
+    name: arm64e targeted validation
+    runs-on: macos-15
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Show environment
+        run: |
+          sw_vers
+          uname -a
+          python3 --version
+          clang --version
+          rustc -vV || true
+
+      - name: Check arm64e codegen crates
+        id: check_codegen
+        run: |
+          python3 x.py check compiler/rustc_codegen_ssa compiler/rustc_codegen_llvm --stage 1
+
+      - name: Run targeted arm64e tests
+        id: targeted_tests
+        run: |
+          python3 x.py test --stage 1 --force-rerun \
+            tests/codegen-llvm/arm64e-apple-ptrauth.rs \
+            tests/assembly-llvm/targets/targets-macho.rs \
+            tests/ui/compile-flags/invalid/branch-protection-arm64e-apple-pac-ret.rs \
+            tests/ui/compile-flags/invalid/target-feature-arm64e-apple-ptrauth-disable.rs
+
+      - name: Build stage1 arm64e std toolchain
+        id: build_stage1
+        run: |
+          python3 x.py build compiler/rustc library/std --stage 1 --target arm64e-apple-darwin
+
+      - name: Diagnose arm64e function pointer codegen
+        id: fnptr_diag
+        continue-on-error: true
+        run: |
+          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+          STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
+
+          cat > /tmp/arm64e_fnptr.rs <<'EOF'
+          #![crate_type = "lib"]
+
+          #[no_mangle]
+          pub extern "C" fn call(f: extern "C" fn() -> i32) -> i32 { f() }
+          EOF
+
+          "$STAGE1" /tmp/arm64e_fnptr.rs --target arm64e-apple-darwin -O --emit=llvm-ir,asm -o /tmp/arm64e_fnptr
+
+          echo "LLVM IR excerpt:"
+          sed -n '1,24p' /tmp/arm64e_fnptr.ll
+          echo
+          echo "Assembly excerpt:"
+          sed -n '1,16p' /tmp/arm64e_fnptr.s
+
+          grep -n '"ptrauth"' /tmp/arm64e_fnptr.ll
+          grep -nE 'braaz|blraaz' /tmp/arm64e_fnptr.s
+
+      - name: Diagnose arm64e TLS runtime
+        id: tls_diag
+        continue-on-error: true
+        run: |
+          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+          STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
+
+          cat > /tmp/arm64e_tls_smoke.rs <<'EOF'
+          use std::cell::RefCell;
+
+          fn main() {
+              thread_local! {
+                  static S: RefCell<String> = RefCell::default();
+              }
+
+              S.with(|x| *x.borrow_mut() = "pika pika".to_string());
+              S.with(|x| println!("{}", x.borrow()));
+          }
+          EOF
+
+          "$STAGE1" /tmp/arm64e_tls_smoke.rs --target arm64e-apple-darwin -O -o /tmp/arm64e_tls_smoke
+          file /tmp/arm64e_tls_smoke
+
+          python3 - <<'PY'
+          import subprocess
+
+          proc = subprocess.run(
+              ["/tmp/arm64e_tls_smoke"],
+              capture_output=True,
+              text=True,
+              timeout=30,
+              check=True,
+          )
+          print(proc.stdout, end="")
+          if proc.stdout.strip() != "pika pika":
+              raise SystemExit(f"unexpected stdout: {proc.stdout!r}")
+          PY
+
+      - name: Upload arm64e diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64e-diagnostics
+          if-no-files-found: ignore
+          path: |
+            /tmp/arm64e_fnptr.ll
+            /tmp/arm64e_fnptr.s
+            /tmp/arm64e_tls_smoke.rs
+
+      - name: Summarize arm64e validation
+        if: always()
+        run: |
+          {
+            echo "## arm64e validation"
+            echo
+            echo "- check_codegen: ${{ steps.check_codegen.outcome }}"
+            echo "- targeted_tests: ${{ steps.targeted_tests.outcome }}"
+            echo "- build_stage1: ${{ steps.build_stage1.outcome }}"
+            echo "- fnptr_diag (non-blocking): ${{ steps.fnptr_diag.outcome }}"
+            echo "- tls_diag (non-blocking): ${{ steps.tls_diag.outcome }}"
+            echo
+            echo "The two diagnostic steps are intentionally non-blocking while the arm64e indirect-call and TLS runtime issues are still being investigated."
+          } >> "$GITHUB_STEP_SUMMARY"
