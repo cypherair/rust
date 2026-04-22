@@ -9,7 +9,7 @@ use rustc_middle::ty::{self, TyCtxt};
 use rustc_session::config::{BranchProtection, FunctionReturn, OptLevel, PAuthKey, PacRet};
 use rustc_span::sym;
 use rustc_symbol_mangling::mangle_internal_symbol;
-use rustc_target::spec::{Arch, FramePointer, Os, SanitizerSet, StackProbeType, StackProtector};
+use rustc_target::spec::{Arch, FramePointer, SanitizerSet, StackProbeType, StackProtector};
 use smallvec::SmallVec;
 
 use crate::context::SimpleCx;
@@ -349,16 +349,10 @@ pub(crate) fn target_features_attr<'ll, 'tcx>(
     tcx: TyCtxt<'tcx>,
     function_features: Vec<String>,
 ) -> Option<&'ll Attribute> {
-    let mut synthesized_features = Vec::new();
-    if has_default_arm64e_ptrauth(tcx.sess) {
-        synthesized_features.push("+pauth");
-    }
-
     let global_features = tcx.global_backend_features(()).iter().map(String::as_str);
     let function_features = function_features.iter().map(String::as_str);
-    let synthesized_features = synthesized_features.into_iter();
     let target_features =
-        global_features.chain(function_features).chain(synthesized_features).intersperse(",").collect::<String>();
+        global_features.chain(function_features).intersperse(",").collect::<String>();
     (!target_features.is_empty())
         .then(|| llvm::CreateAttrStringValue(cx.llcx, "target-features", &target_features))
 }
@@ -628,7 +622,5 @@ fn wasm_import_module(tcx: TyCtxt<'_>, id: DefId) -> Option<&String> {
 }
 
 fn has_default_arm64e_ptrauth(sess: &Session) -> bool {
-    sess.target.arch == Arch::AArch64
-        && matches!(sess.target.os, Os::MacOs | Os::IOs | Os::TvOs | Os::VisionOs)
-        && sess.target.llvm_target.starts_with("arm64e")
+    sess.target.is_apple_arm64e()
 }

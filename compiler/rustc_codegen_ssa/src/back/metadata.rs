@@ -446,7 +446,7 @@ fn macho_object_build_version_for_target(sess: &Session) -> object::write::MachO
 
 /// Is Apple's CPU subtype `arm64e`s
 fn macho_is_arm64e(target: &Target) -> bool {
-    target.llvm_target.starts_with("arm64e")
+    target.is_apple_arm64e()
 }
 
 pub(crate) enum MetadataPosition {

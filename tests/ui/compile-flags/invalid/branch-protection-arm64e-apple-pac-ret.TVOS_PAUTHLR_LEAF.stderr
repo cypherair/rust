@@ -1,0 +1,4 @@
+error: `-Zbranch-protection` with `pac-ret` is incompatible with arm64e Apple targets because they enable `ptrauth-returns` by default
+
+error: aborting due to 1 previous error
+
