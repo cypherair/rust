@@ -48,6 +48,7 @@ pub(crate) struct SCx<'ll> {
     pub llmod: &'ll llvm::Module,
     pub llcx: &'ll llvm::Context,
     pub isize_ty: &'ll Type,
+    pub is_apple_arm64e: bool,
 }
 
 impl<'ll> Borrow<SCx<'ll>> for FullCx<'ll, '_> {
@@ -185,7 +186,8 @@ pub(crate) unsafe fn create_module<'ll>(
     let mod_name = SmallCStr::new(mod_name);
     let llmod = unsafe { llvm::LLVMModuleCreateWithNameInContext(mod_name.as_ptr(), llcx) };
 
-    let cx = SimpleCx::new(llmod, llcx, tcx.data_layout.pointer_size());
+    let cx =
+        SimpleCx::new(llmod, llcx, tcx.data_layout.pointer_size(), attributes::has_default_arm64e_ptrauth(sess));
 
     let mut target_data_layout = sess.target.data_layout.to_string();
     let llvm_version = llvm_util::get_version();
@@ -654,7 +656,12 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
         GenericCx(
             FullCx {
                 tcx,
-                scx: SimpleCx::new(llmod, llcx, tcx.data_layout.pointer_size()),
+                scx: SimpleCx::new(
+                    llmod,
+                    llcx,
+                    tcx.data_layout.pointer_size(),
+                    attributes::has_default_arm64e_ptrauth(tcx.sess),
+                ),
                 use_dll_storage_attrs,
                 tls_model,
                 codegen_unit,
@@ -782,13 +789,18 @@ impl<'ll> SimpleCx<'ll> {
         llmod: &'ll llvm::Module,
         llcx: &'ll llvm::Context,
         pointer_size: Size,
+        is_apple_arm64e: bool,
     ) -> Self {
         let isize_ty = llvm::LLVMIntTypeInContext(llcx, pointer_size.bits() as c_uint);
-        Self(SCx { llmod, llcx, isize_ty }, PhantomData)
+        Self(SCx { llmod, llcx, isize_ty, is_apple_arm64e }, PhantomData)
     }
 }
 
 impl<'ll, CX: Borrow<SCx<'ll>>> GenericCx<'ll, CX> {
+    pub(crate) fn is_apple_arm64e(&self) -> bool {
+        (**self).borrow().is_apple_arm64e
+    }
+
     pub(crate) fn get_metadata_value(&self, metadata: &'ll Metadata) -> &'ll Value {
         llvm::LLVMMetadataAsValue(self.llcx(), metadata)
     }
