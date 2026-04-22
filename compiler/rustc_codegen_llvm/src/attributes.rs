@@ -629,6 +629,6 @@ fn wasm_import_module(tcx: TyCtxt<'_>, id: DefId) -> Option<&String> {
 
 fn has_default_arm64e_ptrauth(sess: &Session) -> bool {
     sess.target.arch == Arch::AArch64
-        && sess.target.os == Os::MacOs
+        && matches!(sess.target.os, Os::MacOs | Os::IOs | Os::TvOs | Os::VisionOs)
         && sess.target.llvm_target.starts_with("arm64e")
 }

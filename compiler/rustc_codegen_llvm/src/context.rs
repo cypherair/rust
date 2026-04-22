@@ -427,7 +427,7 @@ pub(crate) unsafe fn create_module<'ll>(
     }
 
     if sess.target.arch == Arch::AArch64
-        && sess.target.os == Os::MacOs
+        && matches!(sess.target.os, Os::MacOs | Os::IOs | Os::TvOs | Os::VisionOs)
         && sess.target.llvm_target.starts_with("arm64e")
     {
         let ptrauth_abi_version = unsafe {
