@@ -2185,6 +2185,14 @@ unsafe extern "C" {
         ValueLen: size_t,
     );
 
+    pub(crate) fn LLVMRustAddModuleFlagMetadata(
+        M: &Module,
+        MergeBehavior: ModuleFlagMergeBehavior,
+        Name: *const c_char,
+        NameLen: size_t,
+        Value: &Metadata,
+    );
+
     pub(crate) fn LLVMRustDIBuilderCreateCompileUnit<'a>(
         Builder: &DIBuilder<'a>,
         Lang: c_uint,
