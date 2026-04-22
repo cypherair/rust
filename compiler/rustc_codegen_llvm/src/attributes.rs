@@ -621,6 +621,8 @@ fn wasm_import_module(tcx: TyCtxt<'_>, id: DefId) -> Option<&String> {
     tcx.wasm_import_module_map(id.krate).get(&id)
 }
 
-fn has_default_arm64e_ptrauth(sess: &Session) -> bool {
+pub(crate) fn has_default_arm64e_ptrauth(sess: &Session) -> bool {
     sess.target.is_apple_arm64e()
+        && sess.unstable_target_features.contains(&sym::paca)
+        && sess.unstable_target_features.contains(&sym::pacg)
 }

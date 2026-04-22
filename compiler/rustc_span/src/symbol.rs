@@ -1451,6 +1451,8 @@ symbols! {
         owned_box,
         packed,
         packed_bundled_libs,
+        paca,
+        pacg,
         panic,
         panic_2015,
         panic_2021,

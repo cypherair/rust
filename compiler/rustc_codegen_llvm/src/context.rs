@@ -426,7 +426,7 @@ pub(crate) unsafe fn create_module<'ll>(
         }
     }
 
-    if sess.target.is_apple_arm64e() {
+    if attributes::has_default_arm64e_ptrauth(sess) {
         let ptrauth_abi_version = unsafe {
             llvm::LLVMMDNodeInContext2(
                 llcx,
