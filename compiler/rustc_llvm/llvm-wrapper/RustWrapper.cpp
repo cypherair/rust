@@ -1011,6 +1011,13 @@ extern "C" void LLVMRustAddModuleFlagString(
       MDString::get(unwrap(M)->getContext(), StringRef(Value, ValueLen)));
 }
 
+extern "C" void LLVMRustAddModuleFlagMetadata(
+    LLVMModuleRef M, LLVMRustModuleFlagMergeBehavior MergeBehavior,
+    const char *Name, size_t NameLen, LLVMMetadataRef Value) {
+  unwrap(M)->addModuleFlag(fromRust(MergeBehavior), StringRef(Name, NameLen),
+                           unwrap<Metadata>(Value));
+}
+
 extern "C" LLVMValueRef LLVMRustGetLastInstruction(LLVMBasicBlockRef BB) {
   auto Point = unwrap(BB)->rbegin();
   if (Point != unwrap(BB)->rend())
