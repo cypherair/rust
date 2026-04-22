@@ -426,22 +426,26 @@ pub(crate) unsafe fn create_module<'ll>(
         }
     }
 
-    if sess.target.arch == Arch::AArch64
-        && matches!(sess.target.os, Os::MacOs | Os::IOs | Os::TvOs | Os::VisionOs)
-        && sess.target.llvm_target.starts_with("arm64e")
-    {
+    if sess.target.is_apple_arm64e() {
         let ptrauth_abi_version = unsafe {
             llvm::LLVMMDNodeInContext2(
                 llcx,
                 [llvm::LLVMMDNodeInContext2(
                     llcx,
-                    [llvm::LLVMValueAsMetadata(llvm::LLVMConstInt(
-                        llvm::LLVMInt32TypeInContext(llcx),
-                        0,
-                        llvm::FALSE,
-                    ))]
+                    [
+                        llvm::LLVMValueAsMetadata(llvm::LLVMConstInt(
+                            llvm::LLVMInt32TypeInContext(llcx),
+                            0,
+                            llvm::FALSE,
+                        )),
+                        llvm::LLVMValueAsMetadata(llvm::LLVMConstInt(
+                            llvm::LLVMInt1TypeInContext(llcx),
+                            0,
+                            llvm::FALSE,
+                        )),
+                    ]
                     .as_ptr(),
-                    1,
+                    2,
                 )]
                 .as_ptr(),
                 1,
