@@ -265,10 +265,7 @@ pub fn cfg_target_feature<'a, const N: usize>(
             sess.dcx().emit_warn(errors::UnknownCTargetFeaturePrefix { feature });
         },
         |base_feature, new_features, enable| {
-            if !enable
-                && sess.target.is_apple_arm64e()
-                && matches!(base_feature, "paca" | "pacg")
-            {
+            if !enable && sess.target.is_apple_arm64e() && matches!(base_feature, "paca" | "pacg") {
                 if !arm64e_apple_ptrauth_disable_forbidden {
                     sess.dcx().emit_err(errors::Arm64eApplePtrauthDisableForbidden);
                     arm64e_apple_ptrauth_disable_forbidden = true;

@@ -1,3 +1,4 @@
+// ignore-tidy-linelength
 //@ revisions: DARWIN_PACRET DARWIN_PAUTHLR_LEAF IOS_PACRET IOS_PAUTHLR_LEAF TVOS_PACRET TVOS_PAUTHLR_LEAF VISIONOS_PACRET VISIONOS_PAUTHLR_LEAF
 //@ [DARWIN_PACRET] compile-flags: --target=arm64e-apple-darwin -Zbranch-protection=pac-ret
 //@ [DARWIN_PACRET] check-fail

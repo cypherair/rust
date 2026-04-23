@@ -186,8 +186,12 @@ pub(crate) unsafe fn create_module<'ll>(
     let mod_name = SmallCStr::new(mod_name);
     let llmod = unsafe { llvm::LLVMModuleCreateWithNameInContext(mod_name.as_ptr(), llcx) };
 
-    let cx =
-        SimpleCx::new(llmod, llcx, tcx.data_layout.pointer_size(), attributes::has_default_arm64e_ptrauth(sess));
+    let cx = SimpleCx::new(
+        llmod,
+        llcx,
+        tcx.data_layout.pointer_size(),
+        attributes::has_default_arm64e_ptrauth(sess),
+    );
 
     let mut target_data_layout = sess.target.data_layout.to_string();
     let llvm_version = llvm_util::get_version();

@@ -236,11 +236,13 @@ impl<'ll> CodegenCx<'ll, '_> {
 
         let fn_addr = self.const_pointercast(fn_addr, self.type_ptr());
         unsafe {
+            // ConstantPtrAuth requires an i64 discriminator and a pointer-typed
+            // address discriminator, even when both are effectively "zero".
             llvm::LLVMConstantPtrAuth(
                 fn_addr,
                 self.get_const_i32(0),
                 self.get_const_i64(0),
-                self.get_const_i64(0),
+                self.const_null(self.type_ptr()),
             )
         }
     }
