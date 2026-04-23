@@ -319,7 +319,9 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
                             value
                         }
                     }
-                    GlobalAlloc::Function { instance, .. } => self.get_fn_addr(instance),
+                    GlobalAlloc::Function { instance, .. } => {
+                        self.arm64e_fn_ptr_for_data(self.get_fn_addr(instance))
+                    }
                     GlobalAlloc::VTable(ty, dyn_ty) => {
                         let alloc = self
                             .tcx
