@@ -1,3 +1,4 @@
+//@ ignore-backends: gcc
 //@ revisions: DARWIN_PACA DARWIN_PACG DARWIN_BOTH IOS_BOTH TVOS_BOTH VISIONOS_BOTH
 //@ [DARWIN_PACA] compile-flags: --target=arm64e-apple-darwin -Ctarget-feature=-paca
 //@ [DARWIN_PACA] check-fail
