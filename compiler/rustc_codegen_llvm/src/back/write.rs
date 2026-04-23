@@ -70,6 +70,12 @@ fn write_output_file<'ll>(
     } else {
         std::ptr::null()
     };
+
+    // LLVM may devirtualize indirect arm64e calls into direct calls after we
+    // attached ptrauth operand bundles. Strip bundles from call shapes LLVM
+    // cannot lower just before object/assembly emission.
+    llvm::strip_unsupported_ptrauth_bundles(m);
+
     let result = unsafe {
         let pm = llvm::LLVMCreatePassManager();
         llvm::LLVMAddAnalysisPasses(target, pm);
