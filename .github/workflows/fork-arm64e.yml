@@ -32,10 +32,20 @@ jobs:
           fetch-depth: 2
           submodules: recursive
 
+      # CypherAir fork push runs reproduced a shallow-clone case where bootstrap could not
+      # safely treat HEAD^1 as the upstream nightly base commit. Keep this in sync with src/stage0.
+      - name: Fetch nightly base ref
+        run: |
+          git fetch --no-tags --prune --depth=1 origin \
+            +refs/heads/main:refs/remotes/origin/main
+
       - name: Show environment
         run: |
+          echo "github.event_name=${GITHUB_EVENT_NAME}"
           sw_vers
           uname -a
+          git show -s --format='HEAD: %H %P %ae %s' HEAD
+          git show -s --format='origin/main: %H %P %ae %s' refs/remotes/origin/main
           python3 --version
           clang --version
           rustc -vV || true
