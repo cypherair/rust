@@ -1023,6 +1023,12 @@ unsafe extern "C" {
         ConstantVals: *const &'a Value,
         Count: c_uint,
     ) -> &'a Value;
+    pub(crate) fn LLVMConstantPtrAuth<'a>(
+        Ptr: &'a Value,
+        Key: &'a Value,
+        Disc: &'a Value,
+        AddrDisc: &'a Value,
+    ) -> &'a Value;
     pub(crate) fn LLVMConstVector(ScalarConstantVals: *const &Value, Size: c_uint) -> &Value;
 
     // Constant expressions

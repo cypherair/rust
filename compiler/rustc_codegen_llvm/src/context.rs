@@ -881,6 +881,10 @@ impl<'ll, 'tcx> MiscCodegenMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         get_fn(self, instance)
     }
 
+    fn get_fn_addr_for_data(&self, instance: Instance<'tcx>) -> &'ll Value {
+        self.arm64e_fn_ptr_for_data(get_fn(self, instance))
+    }
+
     fn eh_personality(&self) -> &'ll Value {
         // The exception handling personality function.
         //
