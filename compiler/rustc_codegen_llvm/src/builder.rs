@@ -435,10 +435,6 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         if let Some(funclet_bundle) = funclet_bundle {
             bundles.push(funclet_bundle);
         }
-        let ptrauth_bundle = self.ptrauth_operand_bundle(llfn);
-        if let Some(ptrauth_bundle) = ptrauth_bundle.as_ref().map(|b| b.as_ref()) {
-            bundles.push(ptrauth_bundle);
-        }
 
         // Emit CFI pointer type membership test
         self.cfi_type_test(fn_attrs, fn_abi, instance, llfn);
@@ -1863,10 +1859,6 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
         if let Some(funclet_bundle) = funclet_bundle {
             bundles.push(funclet_bundle);
         }
-        let ptrauth_bundle = self.ptrauth_operand_bundle(llfn);
-        if let Some(ptrauth_bundle) = ptrauth_bundle.as_ref().map(|b| b.as_ref()) {
-            bundles.push(ptrauth_bundle);
-        }
 
         // Emit CFI pointer type membership test
         self.cfi_type_test(fn_attrs, fn_abi, instance, llfn);
@@ -1878,6 +1870,9 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
         }
 
         let callbr = unsafe {
+            // LLVM cannot lower arm64e ptrauth operand bundles on callbr yet.
+            // Keep the ordinary call/invoke arm64e coverage, but leave asm-goto
+            // style control flow as a follow-up.
             llvm::LLVMBuildCallBr(
                 self.llbuilder,
                 llty,
