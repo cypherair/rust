@@ -70,6 +70,12 @@ fn write_output_file<'ll>(
     } else {
         std::ptr::null()
     };
+
+    // LLVM may devirtualize indirect arm64e calls into direct calls after we
+    // attached ptrauth operand bundles. Strip bundles from call shapes LLVM
+    // cannot lower just before object/assembly emission.
+    llvm::strip_unsupported_ptrauth_bundles(m);
+
     let result = unsafe {
         let pm = llvm::LLVMCreatePassManager();
         llvm::LLVMAddAnalysisPasses(target, pm);
@@ -742,8 +748,12 @@ pub(crate) unsafe fn llvm_optimize(
     }
 
     if cgcx.target_is_like_gpu && config.offload.contains(&config::Offload::Device) {
-        let cx =
-            SimpleCx::new(module.module_llvm.llmod(), module.module_llvm.llcx, cgcx.pointer_size);
+        let cx = SimpleCx::new(
+            module.module_llvm.llmod(),
+            module.module_llvm.llcx,
+            cgcx.pointer_size,
+            false,
+        );
         for func in cx.get_functions() {
             let offload_kernel = "offload-kernel";
             if attributes::has_string_attr(func, offload_kernel) {

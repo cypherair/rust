@@ -462,6 +462,12 @@ pub(crate) fn add_module_flag_metadata(
     }
 }
 
+pub(crate) fn strip_unsupported_ptrauth_bundles(module: &Module) {
+    unsafe {
+        LLVMRustStripUnsupportedPtrauthBundles(module);
+    }
+}
+
 pub(crate) fn set_dllimport_storage_class<'ll>(v: &'ll Value) {
     unsafe {
         LLVMSetDLLStorageClass(v, DLLStorageClass::DllImport);
