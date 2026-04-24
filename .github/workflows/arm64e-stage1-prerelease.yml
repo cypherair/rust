@@ -315,7 +315,6 @@ jobs:
         if: env.CREATE_RELEASE == 'true'
         run: |
           set -euo pipefail
-          git fetch --tags --force origin
           if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             echo "::error::Release tag already exists: $RELEASE_TAG"
             exit 1
