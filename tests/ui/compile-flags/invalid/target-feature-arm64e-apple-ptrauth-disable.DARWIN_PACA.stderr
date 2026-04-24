@@ -1,0 +1,3 @@
+error: `-Ctarget-feature` cannot disable `paca` or `pacg` on arm64e Apple targets because they enable ptrauth by default
+
+error: aborting due to 1 previous error
