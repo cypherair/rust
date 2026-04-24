@@ -184,6 +184,15 @@ jobs:
           rsync -a --delete "$STAGE1/" dist/stage1-arm64e-patch/
           find dist/stage1-arm64e-patch -name '*.dSYM' -prune -exec rm -rf {} +
 
+          RUST_SRC_DEST="dist/stage1-arm64e-patch/lib/rustlib/src/rust"
+          rm -rf "$RUST_SRC_DEST"
+          mkdir -p "$RUST_SRC_DEST/src/llvm-project"
+          rsync -a --delete library "$RUST_SRC_DEST/"
+          rsync -a --delete src/llvm-project/libunwind "$RUST_SRC_DEST/src/llvm-project/"
+          test -d "$RUST_SRC_DEST/library"
+          test -d "$RUST_SRC_DEST/src/llvm-project/libunwind"
+          du -sh "$RUST_SRC_DEST" | tee /tmp/arm64e-stage1-diagnostics/rust-src-size.txt
+
           "./dist/stage1-arm64e-patch/bin/rustc" --print target-list | tee /tmp/arm64e-stage1-diagnostics/target-list.txt
           for target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
             grep -qx "$target" /tmp/arm64e-stage1-diagnostics/target-list.txt
@@ -191,6 +200,7 @@ jobs:
           HOST_LIBDIR="$(./dist/stage1-arm64e-patch/bin/rustc --print target-libdir --target "$HOST_TRIPLE")"
           test -n "$(find "$HOST_LIBDIR" -maxdepth 1 -name 'libstd-*.rlib' -print -quit)"
           test -n "$(find "$HOST_LIBDIR" -maxdepth 1 -name 'libproc_macro-*.rlib' -print -quit)"
+          test -d "$(./dist/stage1-arm64e-patch/bin/rustc --print sysroot)/lib/rustlib/src/rust/library"
 
           cat > /tmp/arm64e-stage1-diagnostics/hello.rs <<'EOF'
           fn main() {
@@ -231,6 +241,7 @@ jobs:
               "forkMainCommit": "${UPSTREAM_MAIN_SHA}",
               "hostTriple": "${HOST_TRIPLE}",
               "includedHostStdTarget": "${HOST_TRIPLE}",
+              "includedRustSrc": True,
               "targetTriple": "arm64e-apple-darwin",
               "builtAt": "${BUILT_AT}",
               "workflowURL": "${WORKFLOW_URL}",
