@@ -1,4 +1,4 @@
-use crate::spec::base::apple::{Arch, TargetEnv, base};
+use crate::spec::base::apple::{Arch, TargetEnv, arm64e_features, base};
 use crate::spec::{Os, Target, TargetMetadata, TargetOptions};
 
 pub(crate) fn target() -> Target {
@@ -16,7 +16,7 @@ pub(crate) fn target() -> Target {
             .into(),
         arch,
         options: TargetOptions {
-            features: "+neon,+apple-a12,+v8.3a,+paca,+pacg".into(),
+            features: arm64e_features("+neon,+apple-a12"),
             max_atomic_width: Some(128),
             ..opts
         },
