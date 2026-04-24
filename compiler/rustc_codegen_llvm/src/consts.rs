@@ -229,6 +229,24 @@ impl<'ll> CodegenCx<'ll, '_> {
         unsafe { llvm::LLVMConstPointerCast(val, ty) }
     }
 
+    pub(crate) fn arm64e_fn_ptr_for_data(&self, fn_addr: &'ll Value) -> &'ll Value {
+        if !self.is_apple_arm64e() {
+            return fn_addr;
+        }
+
+        let fn_addr = self.const_pointercast(fn_addr, self.type_ptr());
+        unsafe {
+            // ConstantPtrAuth requires an i64 discriminator and a pointer-typed
+            // address discriminator, even when both are effectively "zero".
+            llvm::LLVMConstantPtrAuth(
+                fn_addr,
+                self.get_const_i32(0),
+                self.get_const_i64(0),
+                self.const_null(self.type_ptr()),
+            )
+        }
+    }
+
     /// Create a global variable.
     ///
     /// The returned global variable is a pointer in the default address space for globals.
