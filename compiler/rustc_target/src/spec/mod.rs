@@ -2260,6 +2260,12 @@ impl Target {
             }
         }
     }
+
+    pub fn is_apple_arm64e(&self) -> bool {
+        self.arch == Arch::AArch64
+            && matches!(self.os, Os::MacOs | Os::IOs | Os::TvOs | Os::VisionOs)
+            && self.llvm_target.starts_with("arm64e")
+    }
 }
 
 pub trait HasTargetSpec {

@@ -1,4 +1,4 @@
-use crate::spec::base::apple::{Arch, TargetEnv, base};
+use crate::spec::base::apple::{Arch, TargetEnv, arm64e_features, base};
 use crate::spec::{Os, SanitizerSet, Target, TargetMetadata, TargetOptions};
 
 pub(crate) fn target() -> Target {
@@ -16,6 +16,7 @@ pub(crate) fn target() -> Target {
             .into(),
         arch,
         options: TargetOptions {
+            features: arm64e_features(""),
             mcount: "\u{1}mcount".into(),
             cpu: "apple-m1".into(),
             max_atomic_width: Some(128),
