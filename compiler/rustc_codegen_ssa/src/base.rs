@@ -492,7 +492,7 @@ pub fn maybe_create_entry_wrapper<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         return None;
     }
 
-    let main_llfn = cx.get_fn_addr(instance);
+    let main_llfn = cx.get_fn_addr_for_data(instance);
 
     let entry_fn = create_entry_fn::<Bx>(cx, main_llfn, main_def_id, entry_type);
     return Some(entry_fn);
