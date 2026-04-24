@@ -1211,6 +1211,12 @@ pub(crate) struct ForbiddenCTargetFeature<'a> {
     pub reason: &'a str,
 }
 
+#[derive(Diagnostic)]
+#[diag(
+    "`-Ctarget-feature` cannot disable `paca` or `pacg` on arm64e Apple targets because they enable ptrauth by default"
+)]
+pub(crate) struct Arm64eApplePtrauthDisableForbidden;
+
 pub(crate) struct TargetFeatureDisableOrEnable<'a> {
     pub features: &'a [&'a str],
     pub span: Option<Span>,
