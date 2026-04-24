@@ -207,6 +207,14 @@ pub(crate) fn base(
     (opts, unversioned_llvm_target, arch.target_arch())
 }
 
+pub(crate) fn arm64e_features(prefix: &'static str) -> StaticCow<str> {
+    if prefix.is_empty() {
+        "+v8.3a,+paca,+pacg".into()
+    } else {
+        format!("{prefix},+v8.3a,+paca,+pacg").into()
+    }
+}
+
 /// Generate part of the LLVM target triple.
 ///
 /// See `rustc_codegen_ssa::back::versioned_llvm_target` for the full triple passed to LLVM and
