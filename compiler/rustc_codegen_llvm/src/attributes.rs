@@ -572,6 +572,12 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
     let function_features =
         codegen_fn_attrs.target_features.iter().map(|f| f.name.as_str()).collect::<Vec<&str>>();
 
+    if has_default_arm64e_ptrauth(sess) {
+        to_add.push(llvm::CreateAttrString(cx.llcx, "ptrauth-auth-traps"));
+        to_add.push(llvm::CreateAttrString(cx.llcx, "ptrauth-calls"));
+        to_add.push(llvm::CreateAttrString(cx.llcx, "ptrauth-indirect-gotos"));
+        to_add.push(llvm::CreateAttrString(cx.llcx, "ptrauth-returns"));
+    }
     let function_features = function_features
         .iter()
         // Convert to LLVMFeatures and filter out unavailable ones
@@ -606,4 +612,10 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
 
 fn wasm_import_module(tcx: TyCtxt<'_>, id: DefId) -> Option<&String> {
     tcx.wasm_import_module_map(id.krate).get(&id)
+}
+
+pub(crate) fn has_default_arm64e_ptrauth(sess: &Session) -> bool {
+    sess.target.is_apple_arm64e()
+        && sess.unstable_target_features.contains(&sym::paca)
+        && sess.unstable_target_features.contains(&sym::pacg)
 }
