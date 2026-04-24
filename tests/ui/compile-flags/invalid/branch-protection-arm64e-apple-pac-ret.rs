@@ -2,7 +2,7 @@
 //@ ignore-backends: gcc
 // gcc does not model these LLVM AArch64 Apple arm64e ptrauth diagnostics.
 //@ normalize-stderr: "\nerror: aborting due to 1 previous error\n\n" -> "\nerror: aborting due to 1 previous error\n"
-//@ revisions: DARWIN_PACRET DARWIN_PAUTHLR_LEAF IOS_PACRET IOS_PAUTHLR_LEAF TVOS_PACRET TVOS_PAUTHLR_LEAF
+//@ revisions: DARWIN_PACRET DARWIN_PAUTHLR_LEAF IOS_PACRET IOS_PAUTHLR_LEAF TVOS_PACRET TVOS_PAUTHLR_LEAF VISIONOS_PACRET VISIONOS_PAUTHLR_LEAF
 //@ [DARWIN_PACRET] compile-flags: --target=arm64e-apple-darwin -Zbranch-protection=pac-ret
 //@ [DARWIN_PACRET] check-fail
 //@ [DARWIN_PACRET] needs-llvm-components: aarch64
@@ -21,6 +21,13 @@
 //@ [TVOS_PAUTHLR_LEAF] compile-flags: --target=arm64e-apple-tvos -Zbranch-protection=pac-ret,pc,leaf
 //@ [TVOS_PAUTHLR_LEAF] check-fail
 //@ [TVOS_PAUTHLR_LEAF] needs-llvm-components: aarch64
+//@ [VISIONOS_PACRET] compile-flags: --target=arm64e-apple-visionos -Zbranch-protection=pac-ret
+//@ [VISIONOS_PACRET] check-fail
+//@ [VISIONOS_PACRET] needs-llvm-components: aarch64
+//@ [VISIONOS_PAUTHLR_LEAF] compile-flags: --target=arm64e-apple-visionos -Zbranch-protection=pac-ret,pc,leaf
+//@ [VISIONOS_PAUTHLR_LEAF] check-fail
+//@ [VISIONOS_PAUTHLR_LEAF] needs-llvm-components: aarch64
+
 #![crate_type = "lib"]
 #![feature(no_core, lang_items)]
 #![no_core]

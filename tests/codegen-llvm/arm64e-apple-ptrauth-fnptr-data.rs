@@ -1,11 +1,14 @@
 //@ add-minicore
-//@ revisions: DARWIN IOS TVOS
+//@ revisions: DARWIN IOS TVOS VISIONOS
 //@ [DARWIN] compile-flags: --target arm64e-apple-darwin -Copt-level=0 -Zverify-llvm-ir
 //@ [DARWIN] needs-llvm-components: aarch64
 //@ [IOS] compile-flags: --target arm64e-apple-ios -Copt-level=0 -Zverify-llvm-ir
 //@ [IOS] needs-llvm-components: aarch64
 //@ [TVOS] compile-flags: --target arm64e-apple-tvos -Copt-level=0 -Zverify-llvm-ir
 //@ [TVOS] needs-llvm-components: aarch64
+//@ [VISIONOS] compile-flags: --target arm64e-apple-visionos -Copt-level=0 -Zverify-llvm-ir
+//@ [VISIONOS] needs-llvm-components: aarch64
+
 #![crate_type = "lib"]
 #![feature(no_core, lang_items)]
 #![no_core]
