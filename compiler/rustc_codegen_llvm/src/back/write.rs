@@ -60,6 +60,7 @@ fn write_output_file<'ll>(
     file_type: llvm::FileType,
     self_profiler_ref: &SelfProfilerRef,
     verify_llvm_ir: bool,
+    strip_unsupported_ptrauth_bundles: bool,
 ) {
     debug!("write_output_file output={:?} dwo_output={:?}", output, dwo_output);
     let output_c = path_to_c_string(output);
@@ -70,6 +71,14 @@ fn write_output_file<'ll>(
     } else {
         std::ptr::null()
     };
+
+    if strip_unsupported_ptrauth_bundles {
+        // LLVM may devirtualize indirect arm64e calls into direct calls after we
+        // attached ptrauth operand bundles. Strip bundles from call shapes LLVM
+        // cannot lower just before object/assembly emission.
+        llvm::strip_unsupported_ptrauth_bundles(m);
+    }
+
     let result = unsafe {
         let pm = llvm::LLVMCreatePassManager();
         llvm::LLVMAddAnalysisPasses(target, pm);
@@ -742,8 +751,12 @@ pub(crate) unsafe fn llvm_optimize(
     }
 
     if cgcx.target_is_like_gpu && config.offload.contains(&config::Offload::Device) {
-        let cx =
-            SimpleCx::new(module.module_llvm.llmod(), module.module_llvm.llcx, cgcx.pointer_size);
+        let cx = SimpleCx::new(
+            module.module_llvm.llmod(),
+            module.module_llvm.llcx,
+            cgcx.pointer_size,
+            false,
+        );
         for func in cx.get_functions() {
             let offload_kernel = "offload-kernel";
             if attributes::has_string_attr(func, offload_kernel) {
@@ -875,6 +888,7 @@ pub(crate) unsafe fn llvm_optimize(
                 llvm::FileType::ObjectFile,
                 prof,
                 true,
+                cgcx.target_is_apple_arm64e,
             );
             // We ignore cgcx.save_temps here and unconditionally always keep our `host.out` artifact.
             // Otherwise, recompiling the host code would fail since we deleted that device artifact
@@ -1128,6 +1142,7 @@ pub(crate) fn codegen(
                 llvm::FileType::AssemblyFile,
                 prof,
                 config.verify_llvm_ir,
+                cgcx.target_is_apple_arm64e,
             );
         }
 
@@ -1163,6 +1178,7 @@ pub(crate) fn codegen(
                     llvm::FileType::ObjectFile,
                     prof,
                     config.verify_llvm_ir,
+                    cgcx.target_is_apple_arm64e,
                 );
             }
 

@@ -68,9 +68,13 @@ impl<'a, 'll> SBuilder<'a, 'll> {
 
         let args = self.check_call("call", llty, llfn, args);
         let funclet_bundle = funclet.map(|funclet| funclet.bundle());
-        let mut bundles: SmallVec<[_; 2]> = SmallVec::new();
+        let mut bundles: SmallVec<[_; 3]> = SmallVec::new();
         if let Some(funclet_bundle) = funclet_bundle {
             bundles.push(funclet_bundle);
+        }
+        let ptrauth_bundle = self.ptrauth_operand_bundle(llfn);
+        if let Some(ptrauth_bundle) = ptrauth_bundle.as_ref().map(|b| b.as_ref()) {
+            bundles.push(ptrauth_bundle);
         }
 
         let call = unsafe {
@@ -185,6 +189,18 @@ impl<'a, 'll, CX: Borrow<SCx<'ll>>> GenericBuilder<'a, 'll, CX> {
             let load = llvm::LLVMBuildLoad2(self.llbuilder, ty, ptr, UNNAMED);
             llvm::LLVMSetAlignment(load, align.bytes() as c_uint);
             load
+        }
+    }
+
+    fn ptrauth_operand_bundle(&mut self, llfn: &'ll Value) -> Option<llvm::OperandBundleBox<'ll>> {
+        let is_indirect_call = unsafe { llvm::LLVMRustIsNonGVFunctionPointerTy(llfn) };
+        if self.cx.is_apple_arm64e() && is_indirect_call {
+            Some(llvm::OperandBundleBox::new(
+                "ptrauth",
+                &[self.cx.get_const_i32(0), self.cx.get_const_i64(0)],
+            ))
+        } else {
+            None
         }
     }
 }
@@ -415,9 +431,13 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
         let args = self.check_call("invoke", llty, llfn, args);
         let funclet_bundle = funclet.map(|funclet| funclet.bundle());
-        let mut bundles: SmallVec<[_; 2]> = SmallVec::new();
+        let mut bundles: SmallVec<[_; 3]> = SmallVec::new();
         if let Some(funclet_bundle) = funclet_bundle {
             bundles.push(funclet_bundle);
+        }
+        let ptrauth_bundle = self.ptrauth_operand_bundle(llfn);
+        if let Some(ptrauth_bundle) = ptrauth_bundle.as_ref().map(|b| b.as_ref()) {
+            bundles.push(ptrauth_bundle);
         }
 
         // Emit CFI pointer type membership test
@@ -1388,9 +1408,13 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
         let args = self.check_call("call", llty, llfn, args);
         let funclet_bundle = funclet.map(|funclet| funclet.bundle());
-        let mut bundles: SmallVec<[_; 2]> = SmallVec::new();
+        let mut bundles: SmallVec<[_; 3]> = SmallVec::new();
         if let Some(funclet_bundle) = funclet_bundle {
             bundles.push(funclet_bundle);
+        }
+        let ptrauth_bundle = self.ptrauth_operand_bundle(llfn);
+        if let Some(ptrauth_bundle) = ptrauth_bundle.as_ref().map(|b| b.as_ref()) {
+            bundles.push(ptrauth_bundle);
         }
 
         // Emit CFI pointer type membership test
@@ -1835,7 +1859,7 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
 
         let args = self.check_call("callbr", llty, llfn, args);
         let funclet_bundle = funclet.map(|funclet| funclet.bundle());
-        let mut bundles: SmallVec<[_; 2]> = SmallVec::new();
+        let mut bundles: SmallVec<[_; 3]> = SmallVec::new();
         if let Some(funclet_bundle) = funclet_bundle {
             bundles.push(funclet_bundle);
         }
@@ -1850,6 +1874,9 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
         }
 
         let callbr = unsafe {
+            // LLVM cannot lower arm64e ptrauth operand bundles on callbr yet.
+            // Keep the ordinary call/invoke arm64e coverage, but leave asm-goto
+            // style control flow as a follow-up.
             llvm::LLVMBuildCallBr(
                 self.llbuilder,
                 llty,
