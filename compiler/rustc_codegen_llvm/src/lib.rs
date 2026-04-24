@@ -100,8 +100,12 @@ impl ExtraBackendMethods for LlvmCodegenBackend {
         methods: &[AllocatorMethod],
     ) -> ModuleLlvm {
         let module_llvm = ModuleLlvm::new_metadata(tcx, module_name);
-        let cx =
-            SimpleCx::new(module_llvm.llmod(), &module_llvm.llcx, tcx.data_layout.pointer_size());
+        let cx = SimpleCx::new(
+            module_llvm.llmod(),
+            &module_llvm.llcx,
+            tcx.data_layout.pointer_size(),
+            attributes::has_default_arm64e_ptrauth(tcx.sess),
+        );
         unsafe {
             allocator::codegen(tcx, cx, module_name, methods);
         }
