@@ -303,11 +303,13 @@ jobs:
 
       - name: Generate artifact attestation
         if: env.CREATE_RELEASE == 'true'
-        uses: actions/attest@v3
+        uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
             ${{ env.ASSET_BASE }}.tar.zst
+            ${{ env.ASSET_BASE }}.sha256
             ${{ env.ASSET_BASE }}.json
+            arm64e-stage1-diagnostics.tar.zst
 
       - name: Create release tag
         if: env.CREATE_RELEASE == 'true'
