@@ -19,6 +19,9 @@ pub trait MiscCodegenMethods<'tcx>: BackendTypes {
     }
     fn get_fn(&self, instance: Instance<'tcx>) -> Self::Function;
     fn get_fn_addr(&self, instance: Instance<'tcx>) -> Self::Value;
+    fn get_fn_addr_for_data(&self, instance: Instance<'tcx>) -> Self::Value {
+        self.get_fn_addr(instance)
+    }
     fn eh_personality(&self) -> Self::Function;
     fn sess(&self) -> &Session;
     fn set_frame_pointer_type(&self, llfn: Self::Function);
