@@ -1441,6 +1441,8 @@ symbols! {
         overflow_checks,
         overlapping_marker_traits,
         owned_box,
+        paca,
+        pacg,
         packed,
         packed_bundled_libs,
         panic,
