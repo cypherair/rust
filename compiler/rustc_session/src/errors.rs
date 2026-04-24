@@ -219,6 +219,12 @@ pub(crate) struct SmallDataThresholdNotSupportedForTarget<'a> {
 pub(crate) struct BranchProtectionRequiresAArch64;
 
 #[derive(Diagnostic)]
+#[diag(
+    "`-Zbranch-protection` with `pac-ret` is incompatible with arm64e Apple targets because they enable `ptrauth-returns` by default"
+)]
+pub(crate) struct BranchProtectionPacRetRequiresNonArm64eApple;
+
+#[derive(Diagnostic)]
 #[diag("`-Csplit-debuginfo={$debuginfo}` is unstable on this platform")]
 pub(crate) struct SplitDebugInfoUnstablePlatform {
     pub(crate) debuginfo: SplitDebuginfo,
