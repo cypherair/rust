@@ -1803,14 +1803,16 @@ extern "C" int32_t LLVMRustGetElementTypeArgIndex(LLVMValueRef CallSite) {
 }
 
 extern "C" bool LLVMRustIsNonGVFunctionPointerTy(LLVMValueRef V) {
-  if (unwrap<Value>(V)->getType()->isPointerTy()) {
-    if (auto *GV = dyn_cast<GlobalValue>(unwrap<Value>(V))) {
-      if (GV->getValueType()->isFunctionTy())
-        return false;
-    }
-    return true;
+  auto *Stripped = unwrap<Value>(V)->stripPointerCasts();
+  if (!Stripped->getType()->isPointerTy())
+    return false;
+
+  if (auto *GV = dyn_cast<GlobalValue>(Stripped)) {
+    if (GV->getValueType()->isFunctionTy())
+      return false;
   }
-  return false;
+
+  return true;
 }
 
 extern "C" LLVMValueRef LLVMRustStripPointerCasts(LLVMValueRef V) {
