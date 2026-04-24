@@ -426,6 +426,39 @@ pub(crate) unsafe fn create_module<'ll>(
         }
     }
 
+    if attributes::has_default_arm64e_ptrauth(sess) {
+        let ptrauth_abi_version = unsafe {
+            llvm::LLVMMDNodeInContext2(
+                llcx,
+                [llvm::LLVMMDNodeInContext2(
+                    llcx,
+                    [
+                        llvm::LLVMValueAsMetadata(llvm::LLVMConstInt(
+                            llvm::LLVMInt32TypeInContext(llcx),
+                            0,
+                            llvm::FALSE,
+                        )),
+                        llvm::LLVMValueAsMetadata(llvm::LLVMConstInt(
+                            llvm::LLVMInt1TypeInContext(llcx),
+                            0,
+                            llvm::FALSE,
+                        )),
+                    ]
+                    .as_ptr(),
+                    2,
+                )]
+                .as_ptr(),
+                1,
+            )
+        };
+        llvm::add_module_flag_metadata(
+            llmod,
+            llvm::ModuleFlagMergeBehavior::AppendUnique,
+            "ptrauth.abi-version",
+            ptrauth_abi_version,
+        );
+    }
+
     // Pass on the control-flow protection flags to LLVM (equivalent to `-fcf-protection` in Clang).
     if let CFProtection::Branch | CFProtection::Full = sess.opts.unstable_opts.cf_protection {
         llvm::add_module_flag_u32(
