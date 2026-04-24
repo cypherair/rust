@@ -1282,6 +1282,12 @@ fn validate_commandline_args_with_session_available(sess: &Session) {
     if sess.opts.unstable_opts.branch_protection.is_some() && sess.target.arch != Arch::AArch64 {
         sess.dcx().emit_err(errors::BranchProtectionRequiresAArch64);
     }
+    if let Some(branch_protection) = sess.opts.unstable_opts.branch_protection
+        && sess.target.is_apple_arm64e()
+        && branch_protection.pac_ret.is_some()
+    {
+        sess.dcx().emit_err(errors::BranchProtectionPacRetRequiresNonArm64eApple);
+    }
 
     if let Some(dwarf_version) =
         sess.opts.cg.dwarf_version.or(sess.opts.unstable_opts.dwarf_version)
