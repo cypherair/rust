@@ -1,0 +1,421 @@
+name: Fork arm64e validation
+
+# Fork-only CypherAir validation. Drop this workflow before proposing the
+# upstreamable arm64e core to rust-lang/rust.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/arm64e-upstream-ready-integration-2026-04-24-u9836b06
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-arm64e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arm64e:
+    if: github.repository == 'cypherair/rust'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner_label: macos-15
+            runner_name: macos-15
+          - runner_label: macos-26
+            runner_name: macos-26
+    name: arm64e targeted validation (${{ matrix.runner_name }})
+    runs-on: ${{ matrix.runner_label }}
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          submodules: recursive
+
+      # CypherAir fork push runs reproduced a shallow-clone case where bootstrap could not
+      # safely treat HEAD^1 as the upstream nightly base commit. Keep this in sync with src/stage0.
+      - name: Fetch nightly base ref
+        run: |
+          git fetch --no-tags --prune --depth=1 origin \
+            +refs/heads/main:refs/remotes/origin/main
+
+      - name: Show environment
+        run: |
+          mkdir -p /tmp/arm64e-diagnostics
+          {
+            echo "github.event_name=${GITHUB_EVENT_NAME}"
+            echo "runner_label=${{ matrix.runner_name }}"
+            sw_vers
+            uname -a
+            sysctl -n kern.osproductversion kern.osversion
+            sysctl -n machdep.cpu.brand_string 2>/dev/null || true
+            git show -s --format='HEAD: %H %P %ae %s' HEAD
+            git show -s --format='origin/main: %H %P %ae %s' refs/remotes/origin/main
+            python3 --version
+            clang --version
+            rustc -vV || true
+          } | tee /tmp/arm64e-diagnostics/runner-fingerprint.txt
+
+      - name: Check arm64e codegen crates
+        id: check_codegen
+        run: |
+          python3 x.py check compiler/rustc_codegen_ssa compiler/rustc_codegen_llvm --stage 1
+
+      - name: Run targeted arm64e tests
+        id: targeted_tests
+        run: |
+          python3 x.py test --stage 1 --force-rerun \
+            tests/codegen-llvm/arm64e-apple-ptrauth.rs \
+            tests/codegen-llvm/arm64e-apple-ptrauth-calls.rs \
+            tests/codegen-llvm/arm64e-apple-ptrauth-fnptr-data.rs \
+            tests/codegen-llvm/arm64e-apple-ptrauth-invoke.rs \
+            tests/assembly-llvm/arm64e-apple-ptrauth-calls.rs \
+            tests/assembly-llvm/targets/targets-macho.rs \
+            tests/ui/compile-flags/invalid/branch-protection-arm64e-apple-pac-ret.rs \
+            tests/ui/compile-flags/invalid/target-feature-arm64e-apple-ptrauth-disable.rs
+
+      - name: Build stage1 arm64e std toolchain
+        id: build_stage1
+        run: |
+          python3 x.py build compiler/rustc library/std --stage 1 --target arm64e-apple-darwin
+
+      - name: Prepare arm64e smoke helpers
+        run: |
+          mkdir -p /tmp/arm64e-diagnostics
+          cat > /tmp/arm64e_collect_smoke.py <<'PY'
+          import argparse
+          import json
+          import pathlib
+          import re
+          import subprocess
+          import sys
+
+
+          def run_capture(cmd, timeout=None):
+              proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+              return {
+                  "cmd": cmd,
+                  "returncode": proc.returncode,
+                  "signal": -proc.returncode if proc.returncode < 0 else None,
+                  "stdout": proc.stdout,
+                  "stderr": proc.stderr,
+              }
+
+
+          def load_text(path):
+              try:
+                  return pathlib.Path(path).read_text()
+              except FileNotFoundError:
+                  return None
+
+
+          parser = argparse.ArgumentParser()
+          parser.add_argument("--name", required=True)
+          parser.add_argument("--rustc", required=True)
+          parser.add_argument("--source", required=True)
+          parser.add_argument("--output-base", required=True)
+          parser.add_argument("--json-out", required=True)
+          parser.add_argument("--target", default="arm64e-apple-darwin")
+          parser.add_argument("--emit", default="link")
+          parser.add_argument("--run-binary", action="store_true")
+          parser.add_argument("--expected-stdout")
+          parser.add_argument("--expected-stdout-regex")
+          parser.add_argument("--asm-pattern")
+          args = parser.parse_args()
+
+          output_base = pathlib.Path(args.output_base)
+          compile_cmd = [
+              args.rustc,
+              args.source,
+              "--target",
+              args.target,
+              "-O",
+              "--emit",
+              args.emit,
+              "-o",
+              str(output_base),
+          ]
+          payload = {
+              "name": args.name,
+              "target": args.target,
+              "emit": args.emit,
+              "compile": run_capture(compile_cmd),
+              "output_base": str(output_base),
+              "paths": {
+                  "source": args.source,
+                  "binary": str(output_base),
+                  "asm": str(output_base.with_suffix(".s")),
+                  "ir": str(output_base.with_suffix(".ll")),
+              },
+          }
+
+          overall_ok = payload["compile"]["returncode"] == 0
+
+          if overall_ok:
+              payload["file"] = run_capture(["/usr/bin/file", str(output_base)])
+          else:
+              payload["file"] = None
+
+          asm_path = output_base.with_suffix(".s")
+          asm_text = load_text(asm_path)
+          if asm_text is not None and args.asm_pattern:
+              payload["asm_matches"] = re.findall(args.asm_pattern, asm_text)
+          else:
+              payload["asm_matches"] = []
+
+          if args.run_binary and overall_ok:
+              payload["run"] = run_capture([str(output_base)], timeout=30)
+              if payload["run"]["returncode"] != 0:
+                  overall_ok = False
+              stdout = payload["run"]["stdout"]
+              if args.expected_stdout is not None:
+                  if stdout.rstrip("\n") != args.expected_stdout.rstrip("\n"):
+                      payload["stdout_mismatch"] = {
+                          "expected": args.expected_stdout,
+                          "actual": stdout,
+                      }
+                      overall_ok = False
+              if args.expected_stdout_regex is not None:
+                  if re.fullmatch(args.expected_stdout_regex, stdout.strip()) is None:
+                      payload["stdout_regex_mismatch"] = {
+                          "expected_regex": args.expected_stdout_regex,
+                          "actual": stdout,
+                      }
+                      overall_ok = False
+          else:
+              payload["run"] = None
+
+          json_path = pathlib.Path(args.json_out)
+          json_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+          print(f"== {args.name} compile ==")
+          print(f"returncode={payload['compile']['returncode']}")
+          if payload["compile"]["stdout"]:
+              print("-- stdout --")
+              print(payload["compile"]["stdout"], end="")
+          if payload["compile"]["stderr"]:
+              print("-- stderr --")
+              print(payload["compile"]["stderr"], end="")
+          if payload["file"] is not None:
+              print("== file ==")
+              print(payload["file"]["stdout"], end="")
+          if payload["run"] is not None:
+              print("== run ==")
+              print(f"returncode={payload['run']['returncode']}")
+              if payload["run"]["signal"] is not None:
+                  print(f"signal={payload['run']['signal']}")
+              print("-- stdout --")
+              print(payload["run"]["stdout"], end="")
+              print("-- stderr --")
+              print(payload["run"]["stderr"], end="")
+          if payload["asm_matches"]:
+              print("== asm matches ==")
+              for match in payload["asm_matches"]:
+                  print(match)
+
+          sys.exit(0 if overall_ok else 1)
+          PY
+
+      - name: Diagnose arm64e hello runtime
+        id: hello_diag
+        continue-on-error: true
+        run: |
+          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+          STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
+
+          cat > /tmp/arm64e-diagnostics/arm64e_hello.rs <<'EOF'
+          fn main() {
+              println!("hello-stage1");
+          }
+          EOF
+
+          python3 /tmp/arm64e_collect_smoke.py \
+            --name hello \
+            --rustc "$STAGE1" \
+            --source /tmp/arm64e-diagnostics/arm64e_hello.rs \
+            --output-base /tmp/arm64e-diagnostics/arm64e_hello \
+            --json-out /tmp/arm64e-diagnostics/arm64e_hello.json \
+            --emit link \
+            --run-binary \
+            --expected-stdout 'hello-stage1'
+
+      - name: Diagnose arm64e thread id runtime
+        id: thread_id_diag
+        continue-on-error: true
+        run: |
+          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+          STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
+
+          cat > /tmp/arm64e-diagnostics/arm64e_thread_id.rs <<'EOF'
+          fn main() {
+              println!("{:?}", std::thread::current().id());
+          }
+          EOF
+
+          python3 /tmp/arm64e_collect_smoke.py \
+            --name thread_id \
+            --rustc "$STAGE1" \
+            --source /tmp/arm64e-diagnostics/arm64e_thread_id.rs \
+            --output-base /tmp/arm64e-diagnostics/arm64e_thread_id \
+            --json-out /tmp/arm64e-diagnostics/arm64e_thread_id.json \
+            --emit link \
+            --run-binary \
+            --expected-stdout-regex '^ThreadId\([0-9]+\)$'
+
+      - name: Diagnose arm64e function pointer runtime
+        id: fnptr_diag
+        continue-on-error: true
+        run: |
+          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+          STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
+
+          cat > /tmp/arm64e-diagnostics/arm64e_fnptr.rs <<'EOF'
+          #[inline(never)]
+          pub extern "C" fn target(x: i32) -> i32 { x + 1 }
+
+          fn main() {
+              let f: extern "C" fn(i32) -> i32 = target;
+              println!("{}", f(41));
+          }
+          EOF
+
+          python3 /tmp/arm64e_collect_smoke.py \
+            --name fnptr \
+            --rustc "$STAGE1" \
+            --source /tmp/arm64e-diagnostics/arm64e_fnptr.rs \
+            --output-base /tmp/arm64e-diagnostics/arm64e_fnptr \
+            --json-out /tmp/arm64e-diagnostics/arm64e_fnptr.json \
+            --emit llvm-ir,asm,link \
+            --run-binary \
+            --expected-stdout '42' \
+            --asm-pattern 'braaz|blraaz|blr'
+
+          echo "LLVM IR excerpt:"
+          sed -n '1,40p' /tmp/arm64e-diagnostics/arm64e_fnptr.ll || true
+          echo
+          echo "Assembly excerpt:"
+          sed -n '1,40p' /tmp/arm64e-diagnostics/arm64e_fnptr.s || true
+
+      - name: Diagnose arm64e TLS runtime
+        id: tls_diag
+        continue-on-error: true
+        run: |
+          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+          STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
+
+          cat > /tmp/arm64e-diagnostics/arm64e_tls_smoke.rs <<'EOF'
+          use std::cell::RefCell;
+
+          fn main() {
+              thread_local! {
+                  static S: RefCell<String> = RefCell::default();
+              }
+
+              S.with(|x| *x.borrow_mut() = "pika pika".to_string());
+              S.with(|x| println!("{}", x.borrow()));
+          }
+          EOF
+
+          python3 /tmp/arm64e_collect_smoke.py \
+            --name tls \
+            --rustc "$STAGE1" \
+            --source /tmp/arm64e-diagnostics/arm64e_tls_smoke.rs \
+            --output-base /tmp/arm64e-diagnostics/arm64e_tls_smoke \
+            --json-out /tmp/arm64e-diagnostics/arm64e_tls_smoke.json \
+            --emit llvm-ir,asm,link \
+            --run-binary \
+            --expected-stdout 'pika pika' \
+            --asm-pattern 'braaz|blraaz|blr'
+
+          echo "LLVM IR excerpt:"
+          sed -n '1,40p' /tmp/arm64e-diagnostics/arm64e_tls_smoke.ll || true
+          echo
+          echo "Assembly excerpt:"
+          sed -n '1,60p' /tmp/arm64e-diagnostics/arm64e_tls_smoke.s || true
+
+      - name: Upload arm64e diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64e-diagnostics-${{ matrix.runner_name }}
+          if-no-files-found: ignore
+          path: /tmp/arm64e-diagnostics
+
+      - name: Summarize arm64e validation
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import pathlib
+
+          root = pathlib.Path("/tmp/arm64e-diagnostics")
+          cases = [
+              ("hello", "arm64e_hello.json"),
+              ("thread_id", "arm64e_thread_id.json"),
+              ("fnptr", "arm64e_fnptr.json"),
+              ("tls", "arm64e_tls_smoke.json"),
+          ]
+
+          def sanitize(text):
+              if text is None:
+                  return ""
+              text = text.strip()
+              if not text:
+                  return ""
+              return text.replace("|", "\\|").replace("\n", "<br>")
+
+          print("## arm64e validation (${{ matrix.runner_name }})")
+          print()
+          print("- check_codegen: ${{ steps.check_codegen.outcome }}")
+          print("- targeted_tests: ${{ steps.targeted_tests.outcome }}")
+          print("- build_stage1: ${{ steps.build_stage1.outcome }}")
+          print("- hello_diag (non-blocking): ${{ steps.hello_diag.outcome }}")
+          print("- thread_id_diag (non-blocking): ${{ steps.thread_id_diag.outcome }}")
+          print("- fnptr_diag (non-blocking): ${{ steps.fnptr_diag.outcome }}")
+          print("- tls_diag (non-blocking): ${{ steps.tls_diag.outcome }}")
+          print()
+          print("| case | compile | run | rc/signal | file | stdout | asm hits |")
+          print("| --- | --- | --- | --- | --- | --- | --- |")
+          for case_name, json_name in cases:
+              path = root / json_name
+              if not path.exists():
+                  print(f"| {case_name} | missing | missing |  |  |  |  |")
+                  continue
+              data = json.loads(path.read_text())
+              compile_status = "ok" if data["compile"]["returncode"] == 0 else "fail"
+              run = data.get("run")
+              if run is None:
+                  run_status = "not-run"
+                  rc_signal = ""
+                  stdout = ""
+              else:
+                  run_status = "ok" if run["returncode"] == 0 else "fail"
+                  rc_signal = f"rc={run['returncode']}"
+                  if run.get("signal") is not None:
+                      rc_signal += f" sig={run['signal']}"
+                  stdout = sanitize(run.get("stdout"))
+              file_output = sanitize((data.get("file") or {}).get("stdout"))
+              asm_hits = sanitize(",".join(data.get("asm_matches") or []))
+              print(
+                  f"| {case_name} | {compile_status} | {run_status} | {sanitize(rc_signal)} | "
+                  f"{file_output} | {stdout} | {asm_hits} |"
+              )
+          print()
+          print("The four host-binary smoke steps are non-blocking diagnostics for fork runner coverage; targeted tests and stage1 build remain blocking.")
+          PY
+
+          {
+            echo "Smoke diagnostic JSON files:"
+            ls -1 /tmp/arm64e-diagnostics/*.json
+          }
