@@ -1590,6 +1590,40 @@ extern "C" uint64_t LLVMRustModuleInstructionStats(LLVMModuleRef M) {
   return unwrap(M)->getInstructionCount();
 }
 
+extern "C" void LLVMRustStripUnsupportedPtrauthBundles(LLVMModuleRef M) {
+  Module *Mod = unwrap(M);
+  LLVMContext &Ctx = Mod->getContext();
+  const uint32_t PtrauthID = Ctx.getOperandBundleTagID("ptrauth");
+  SmallVector<CallBase *, 16> ToRewrite;
+
+  for (Function &F : *Mod) {
+    for (BasicBlock &BB : F) {
+      for (Instruction &I : BB) {
+        auto *CB = dyn_cast<CallBase>(&I);
+        if (!CB || !CB->countOperandBundlesOfType(PtrauthID))
+          continue;
+
+        bool ShouldStrip = isa<CallBrInst>(CB);
+        if (!ShouldStrip) {
+          Value *CalledOperand = CB->getCalledOperand()->stripPointerCasts();
+          if (auto *GV = dyn_cast<GlobalValue>(CalledOperand))
+            ShouldStrip = GV->getValueType()->isFunctionTy();
+        }
+
+        if (ShouldStrip)
+          ToRewrite.push_back(CB);
+      }
+    }
+  }
+
+  for (CallBase *CB : ToRewrite) {
+    CallBase *Replacement =
+        CallBase::removeOperandBundle(CB, PtrauthID, CB->getIterator());
+    CB->replaceAllUsesWith(Replacement);
+    CB->eraseFromParent();
+  }
+}
+
 // Transfers ownership of DiagnosticHandler unique_ptr to the caller.
 extern "C" DiagnosticHandler *
 LLVMRustContextGetDiagnosticHandler(LLVMContextRef C) {
@@ -1782,14 +1816,16 @@ extern "C" int32_t LLVMRustGetElementTypeArgIndex(LLVMValueRef CallSite) {
 }
 
 extern "C" bool LLVMRustIsNonGVFunctionPointerTy(LLVMValueRef V) {
-  if (unwrap<Value>(V)->getType()->isPointerTy()) {
-    if (auto *GV = dyn_cast<GlobalValue>(unwrap<Value>(V))) {
-      if (GV->getValueType()->isFunctionTy())
-        return false;
-    }
-    return true;
+  auto *Stripped = unwrap<Value>(V)->stripPointerCasts();
+  if (!Stripped->getType()->isPointerTy())
+    return false;
+
+  if (auto *GV = dyn_cast<GlobalValue>(Stripped)) {
+    if (GV->getValueType()->isFunctionTy())
+      return false;
   }
-  return false;
+
+  return true;
 }
 
 extern "C" LLVMValueRef LLVMRustStripPointerCasts(LLVMValueRef V) {
