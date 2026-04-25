@@ -5,12 +5,23 @@ name: Fork arm64e validation
 
 on:
   workflow_dispatch:
+    inputs:
+      validation_level:
+        description: Validation depth for manual fork runs.
+        required: true
+        default: targeted
+        type: choice
+        options:
+          - targeted
+          - extended
   push:
     branches:
       - carry/cypherair-arm64e-toolchain
   pull_request:
     branches:
       - main
+  schedule:
+    - cron: "43 11 * * 2"
 
 permissions:
   contents: read
@@ -76,10 +87,7 @@ jobs:
         id: targeted_tests
         run: |
           python3 x.py test --stage 1 --force-rerun \
-            tests/codegen-llvm/arm64e-apple-ptrauth.rs \
-            tests/codegen-llvm/arm64e-apple-ptrauth-calls.rs \
-            tests/codegen-llvm/arm64e-apple-ptrauth-fnptr-data.rs \
-            tests/codegen-llvm/arm64e-apple-ptrauth-invoke.rs \
+            tests/codegen-llvm/arm64e-apple-ptrauth*.rs \
             tests/assembly-llvm/arm64e-apple-ptrauth-calls.rs \
             tests/assembly-llvm/targets/targets-macho.rs \
             tests/ui/compile-flags/invalid/branch-protection-arm64e-apple-pac-ret.rs \
@@ -419,3 +427,85 @@ jobs:
             echo "Smoke diagnostic JSON files:"
             ls -1 /tmp/arm64e-diagnostics/*.json
           }
+
+  arm64e-extended:
+    if: ${{ github.repository == 'cypherair/rust' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.validation_level == 'extended')) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner_label:
+          - macos-15
+          - macos-26
+        suite:
+          - check-codegen
+          - codegen-ptrauth
+          - assembly-ptrauth
+          - targets-macho
+          - ui-ptrauth-flags
+          - stage1-std
+    name: arm64e extended (${{ matrix.suite }}, ${{ matrix.runner_label }})
+    runs-on: ${{ matrix.runner_label }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          submodules: recursive
+
+      - name: Fetch nightly base ref
+        run: |
+          git fetch --no-tags --prune --depth=1 origin \
+            +refs/heads/main:refs/remotes/origin/main
+
+      - name: Show environment
+        run: |
+          {
+            echo "github.event_name=${GITHUB_EVENT_NAME}"
+            echo "validation_level=${{ inputs.validation_level || 'scheduled' }}"
+            echo "runner_label=${{ matrix.runner_label }}"
+            echo "suite=${{ matrix.suite }}"
+            sw_vers
+            uname -a
+            git show -s --format='HEAD: %H %P %ae %s' HEAD
+            git show -s --format='origin/main: %H %P %ae %s' refs/remotes/origin/main
+            python3 --version
+            clang --version
+            rustc -vV || true
+          }
+
+      - name: Run extended suite
+        run: |
+          set -euo pipefail
+          case "${{ matrix.suite }}" in
+            check-codegen)
+              python3 x.py check compiler/rustc_codegen_ssa compiler/rustc_codegen_llvm --stage 1
+              ;;
+            codegen-ptrauth)
+              python3 x.py test --stage 1 --force-rerun \
+                tests/codegen-llvm/arm64e-apple-ptrauth*.rs
+              ;;
+            assembly-ptrauth)
+              python3 x.py test --stage 1 --force-rerun \
+                tests/assembly-llvm/arm64e-apple-ptrauth*.rs
+              ;;
+            targets-macho)
+              python3 x.py test --stage 1 --force-rerun \
+                tests/assembly-llvm/targets/targets-macho.rs
+              ;;
+            ui-ptrauth-flags)
+              python3 x.py test --stage 1 --force-rerun \
+                tests/ui/compile-flags/invalid/branch-protection-arm64e-apple-pac-ret.rs \
+                tests/ui/compile-flags/invalid/target-feature-arm64e-apple-ptrauth-disable.rs
+              ;;
+            stage1-std)
+              python3 x.py build compiler/rustc library/std --stage 1 --target arm64e-apple-darwin
+              ;;
+            *)
+              echo "::error::unknown extended suite: ${{ matrix.suite }}"
+              exit 1
+              ;;
+          esac
