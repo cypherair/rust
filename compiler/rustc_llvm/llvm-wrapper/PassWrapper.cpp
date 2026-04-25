@@ -1,4 +1,5 @@
 #include "LLVMWrapper.h"
+#include "PtrauthUtils.h"
 
 #include "llvm-c/Core.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -836,6 +837,8 @@ extern "C" LLVMRustResult LLVMRustOptimize(
 
   ModulePassManager MPM;
   bool NeedThinLTOBufferPasses = true;
+  bool StripUnsupportedPtrauthBundles =
+      rustc_llvm::isAppleArm64eModule(*TheModule);
   auto ThinLTOBuffer = std::make_unique<LLVMRustBuffer>();
   auto ThinLTOSummaryBuffer = std::make_unique<LLVMRustBuffer>();
   raw_string_ostream ThinLTODataOS(ThinLTOBuffer->data);
@@ -863,6 +866,8 @@ extern "C" LLVMRustResult LLVMRustOptimize(
           // bitcode for embedding is obtained after performing
           // `ThinLTOPreLinkDefaultPipeline`.
           MPM.addPass(PB.buildThinLTOPreLinkDefaultPipeline(OptLevel));
+          rustc_llvm::addStripUnsupportedPtrauthBundlesPass(
+              MPM, StripUnsupportedPtrauthBundles);
           MPM.addPass(ThinLTOBitcodeWriterPass(
               ThinLTODataOS,
               ThinLTOSummaryBufferRef ? &ThinLinkDataOS : nullptr));
@@ -920,6 +925,8 @@ extern "C" LLVMRustResult LLVMRustOptimize(
   if (ThinLTOBufferRef && *ThinLTOBufferRef == nullptr) {
     // thin lto summaries prevent fat lto, so do not emit them if fat
     // lto is requested. See PR #136840 for background information.
+    rustc_llvm::addStripUnsupportedPtrauthBundlesPass(
+        MPM, StripUnsupportedPtrauthBundles);
     if (OptStage != LLVMRustOptStage::PreLinkFatLTO) {
       MPM.addPass(ThinLTOBitcodeWriterPass(
           ThinLTODataOS, ThinLTOSummaryBufferRef ? &ThinLinkDataOS : nullptr));
@@ -1438,6 +1445,8 @@ extern "C" bool LLVMRustPrepareThinLTOImport(const LLVMRustThinLTOData *Data,
 
 extern "C" LLVMRustBuffer *LLVMRustModuleSerialize(LLVMModuleRef M,
                                                    bool is_thin) {
+  bool StripUnsupportedPtrauthBundles =
+      rustc_llvm::isAppleArm64eModule(*unwrap(M));
   auto Ret = std::make_unique<LLVMRustBuffer>();
   {
     auto OS = raw_string_ostream(Ret->data);
@@ -1454,9 +1463,13 @@ extern "C" LLVMRustBuffer *LLVMRustModuleSerialize(LLVMModuleRef M,
         PB.registerLoopAnalyses(LAM);
         PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
         ModulePassManager MPM;
+        rustc_llvm::addStripUnsupportedPtrauthBundlesPass(
+            MPM, StripUnsupportedPtrauthBundles);
         MPM.addPass(ThinLTOBitcodeWriterPass(OS, nullptr));
         MPM.run(*unwrap(M), MAM);
       } else {
+        if (StripUnsupportedPtrauthBundles)
+          rustc_llvm::stripUnsupportedPtrauthBundles(*unwrap(M));
         WriteBitcodeToFile(*unwrap(M), OS);
       }
     }
