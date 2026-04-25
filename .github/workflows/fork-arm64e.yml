@@ -76,10 +76,7 @@ jobs:
         id: targeted_tests
         run: |
           python3 x.py test --stage 1 --force-rerun \
-            tests/codegen-llvm/arm64e-apple-ptrauth.rs \
-            tests/codegen-llvm/arm64e-apple-ptrauth-calls.rs \
-            tests/codegen-llvm/arm64e-apple-ptrauth-fnptr-data.rs \
-            tests/codegen-llvm/arm64e-apple-ptrauth-invoke.rs \
+            tests/codegen-llvm/arm64e-apple-ptrauth*.rs \
             tests/assembly-llvm/arm64e-apple-ptrauth-calls.rs \
             tests/assembly-llvm/targets/targets-macho.rs \
             tests/ui/compile-flags/invalid/branch-protection-arm64e-apple-pac-ret.rs \
