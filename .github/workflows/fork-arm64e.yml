@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - codex/arm64e-upstream-ready-integration-2026-04-24-u9836b06
+      - carry/cypherair-arm64e-toolchain
   pull_request:
     branches:
       - main

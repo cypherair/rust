@@ -6,7 +6,7 @@ on:
       source_ref:
         description: Branch, tag, or SHA to build.
         required: true
-        default: codex/arm64e-upstream-ready-integration-2026-04-24-u9836b06
+        default: carry/cypherair-arm64e-toolchain
         type: string
       release_tag_prefix:
         description: Unique release tag prefix.
@@ -20,7 +20,7 @@ on:
         type: boolean
   push:
     branches:
-      - codex/arm64e-upstream-ready-integration-2026-04-24-u9836b06
+      - carry/cypherair-arm64e-toolchain
   schedule:
     - cron: "17 10 * * 1"
 
@@ -35,7 +35,7 @@ concurrency:
 
 env:
   ASSET_BASE: rust-stage1-arm64e-apple-darwin
-  INTEGRATION_BRANCH: codex/arm64e-upstream-ready-integration-2026-04-24-u9836b06
+  INTEGRATION_BRANCH: carry/cypherair-arm64e-toolchain
 
 jobs:
   publish-stage1:

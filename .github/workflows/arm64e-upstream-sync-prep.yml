@@ -6,7 +6,7 @@ on:
       integration_branch:
         description: CypherAir arm64e integration branch to inspect.
         required: true
-        default: codex/arm64e-upstream-ready-integration-2026-04-24-u9836b06
+        default: carry/cypherair-arm64e-toolchain
         type: string
       upstream_ref:
         description: Upstream Rust ref to merge in the dry-run workspace.
