@@ -983,6 +983,7 @@ impl<'ll, 'tcx> MiscCodegenMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                 llvm::AttributePlace::Function,
                 attributes::target_features_attr(self, self.tcx, vec![]).as_slice(),
             );
+            attributes::apply_default_arm64e_ptrauth_attrs(self, self.sess(), llfn);
             Some(llfn)
         } else {
             // If the symbol already exists, it is an error: for example, the user wrote
