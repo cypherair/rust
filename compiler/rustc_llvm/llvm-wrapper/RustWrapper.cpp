@@ -1618,6 +1618,8 @@ extern "C" void LLVMRustStripUnsupportedPtrauthBundles(LLVMModuleRef M) {
   for (CallBase *CB : ToRewrite) {
     CallBase *Replacement =
         CallBase::removeOperandBundle(CB, PtrauthID, CB->getIterator());
+    Replacement->copyMetadata(*CB);
+    Replacement->setDebugLoc(CB->getDebugLoc());
     CB->replaceAllUsesWith(Replacement);
     CB->eraseFromParent();
   }
@@ -1817,6 +1819,9 @@ extern "C" int32_t LLVMRustGetElementTypeArgIndex(LLVMValueRef CallSite) {
 extern "C" bool LLVMRustIsNonGVFunctionPointerTy(LLVMValueRef V) {
   auto *Stripped = unwrap<Value>(V)->stripPointerCasts();
   if (!Stripped->getType()->isPointerTy())
+    return false;
+
+  if (isa<InlineAsm>(Stripped))
     return false;
 
   if (auto *GV = dyn_cast<GlobalValue>(Stripped)) {
