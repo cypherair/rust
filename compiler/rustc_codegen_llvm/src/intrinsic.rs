@@ -31,6 +31,7 @@ use rustc_target::spec::{Arch, Os};
 use tracing::debug;
 
 use crate::abi::FnAbiLlvmExt;
+use crate::attributes;
 use crate::builder::Builder;
 use crate::builder::autodiff::{adjust_activity_to_abi, generate_enzyme_call};
 use crate::builder::gpu_offload::{
@@ -1646,6 +1647,7 @@ fn gen_fn<'a, 'll, 'tcx>(
     let llfn = cx.declare_fn(name, fn_abi, None);
     cx.set_frame_pointer_type(llfn);
     cx.apply_target_cpu_attr(llfn);
+    attributes::apply_default_arm64e_ptrauth_attrs(cx, cx.tcx.sess, llfn);
     // FIXME(eddyb) find a nicer way to do this.
     llvm::set_linkage(llfn, llvm::Linkage::InternalLinkage);
     let llbb = Builder::append_block(cx, llfn, "entry-block");
