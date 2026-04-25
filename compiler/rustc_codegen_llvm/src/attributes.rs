@@ -578,12 +578,7 @@ pub(crate) fn llfn_attrs_from_instance<'ll, 'tcx>(
         }
     }
 
-    if has_default_arm64e_ptrauth(sess) {
-        to_add.push(llvm::CreateAttrString(cx.llcx, "ptrauth-auth-traps"));
-        to_add.push(llvm::CreateAttrString(cx.llcx, "ptrauth-calls"));
-        to_add.push(llvm::CreateAttrString(cx.llcx, "ptrauth-indirect-gotos"));
-        to_add.push(llvm::CreateAttrString(cx.llcx, "ptrauth-returns"));
-    }
+    to_add.extend(default_arm64e_ptrauth_attrs(cx, sess));
 
     let function_features = function_features
         .iter()
@@ -625,4 +620,27 @@ pub(crate) fn has_default_arm64e_ptrauth(sess: &Session) -> bool {
     sess.target.is_apple_arm64e()
         && sess.unstable_target_features.contains(&sym::paca)
         && sess.unstable_target_features.contains(&sym::pacg)
+}
+
+pub(crate) fn default_arm64e_ptrauth_attrs<'ll>(
+    cx: &SimpleCx<'ll>,
+    sess: &Session,
+) -> SmallVec<[&'ll Attribute; 4]> {
+    let mut attrs = SmallVec::new();
+    if has_default_arm64e_ptrauth(sess) {
+        attrs.push(llvm::CreateAttrString(cx.llcx, "ptrauth-auth-traps"));
+        attrs.push(llvm::CreateAttrString(cx.llcx, "ptrauth-calls"));
+        attrs.push(llvm::CreateAttrString(cx.llcx, "ptrauth-indirect-gotos"));
+        attrs.push(llvm::CreateAttrString(cx.llcx, "ptrauth-returns"));
+    }
+    attrs
+}
+
+pub(crate) fn apply_default_arm64e_ptrauth_attrs<'ll>(
+    cx: &SimpleCx<'ll>,
+    sess: &Session,
+    llfn: &'ll Value,
+) {
+    let attrs = default_arm64e_ptrauth_attrs(cx, sess);
+    attributes::apply_to_llfn(llfn, Function, &attrs);
 }
