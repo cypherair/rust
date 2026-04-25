@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - codex/arm64e-upstream-ready-integration-2026-04-24-u9836b06
+      - integration/arm64e-upstream-prs
   pull_request:
     branches:
       - main
