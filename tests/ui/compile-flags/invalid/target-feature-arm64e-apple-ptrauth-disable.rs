@@ -1,13 +1,16 @@
 //@ ignore-backends: gcc
 // gcc does not model these LLVM AArch64 Apple arm64e ptrauth diagnostics.
 //@ normalize-stderr: "\nerror: aborting due to 1 previous error\n\n" -> "\nerror: aborting due to 1 previous error\n"
-//@ revisions: DARWIN_PACA DARWIN_PACG DARWIN_BOTH IOS_BOTH TVOS_BOTH
+//@ revisions: DARWIN_PACA DARWIN_PACG DARWIN_PAUTH DARWIN_BOTH IOS_BOTH TVOS_BOTH
 //@ [DARWIN_PACA] compile-flags: --target=arm64e-apple-darwin -Ctarget-feature=-paca
 //@ [DARWIN_PACA] check-fail
 //@ [DARWIN_PACA] needs-llvm-components: aarch64
 //@ [DARWIN_PACG] compile-flags: --target=arm64e-apple-darwin -Ctarget-feature=-pacg
 //@ [DARWIN_PACG] check-fail
 //@ [DARWIN_PACG] needs-llvm-components: aarch64
+//@ [DARWIN_PAUTH] compile-flags: --target=arm64e-apple-darwin -Ctarget-feature=-pauth
+//@ [DARWIN_PAUTH] check-fail
+//@ [DARWIN_PAUTH] needs-llvm-components: aarch64
 //@ [DARWIN_BOTH] compile-flags: --target=arm64e-apple-darwin -Ctarget-feature=-paca,-pacg
 //@ [DARWIN_BOTH] check-fail
 //@ [DARWIN_BOTH] needs-llvm-components: aarch64
@@ -30,4 +33,4 @@ pub trait MetaSized: PointeeSized {}
 #[lang = "sized"]
 pub trait Sized: MetaSized {}
 
-//~? ERROR `-Ctarget-feature` cannot disable `paca` or `pacg` on arm64e Apple targets because they enable ptrauth by default
+//~? ERROR `-Ctarget-feature` cannot disable `paca`, `pacg`, or LLVM `pauth` on arm64e Apple targets because they enable ptrauth by default
