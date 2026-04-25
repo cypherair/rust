@@ -214,6 +214,14 @@ fn parse_rust_feature_list<'a>(
     }
 }
 
+fn is_forbidden_arm64e_apple_ptrauth_disable(
+    sess: &Session,
+    base_feature: &str,
+    enable: bool,
+) -> bool {
+    !enable && sess.target.is_apple_arm64e() && matches!(base_feature, "paca" | "pacg" | "pauth")
+}
+
 /// Utility function for a codegen backend to compute `cfg(target_feature)`, or more specifically,
 /// to populate `sess.unstable_target_features` and `sess.target_features` (these are the first and
 /// 2nd component of the return value, respectively).
@@ -265,7 +273,7 @@ pub fn cfg_target_feature<'a, const N: usize>(
             sess.dcx().emit_warn(errors::UnknownCTargetFeaturePrefix { feature });
         },
         |base_feature, new_features, enable| {
-            if !enable && sess.target.is_apple_arm64e() && matches!(base_feature, "paca" | "pacg") {
+            if is_forbidden_arm64e_apple_ptrauth_disable(sess, base_feature, enable) {
                 if !arm64e_apple_ptrauth_disable_forbidden {
                     sess.dcx().emit_err(errors::Arm64eApplePtrauthDisableForbidden);
                     arm64e_apple_ptrauth_disable_forbidden = true;
@@ -436,7 +444,11 @@ pub fn flag_to_backend_features<'a>(
         |_feature| {
             // Errors are already emitted in `cfg_target_feature`; avoid duplicates.
         },
-        |_base_feature, new_features, enable| {
+        |base_feature, new_features, enable| {
+            if is_forbidden_arm64e_apple_ptrauth_disable(sess, base_feature, enable) {
+                return;
+            }
+
             rust_features.extend(
                 UnordSet::from(new_features).to_sorted_stable_ord().iter().map(|&&s| (enable, s)),
             );
