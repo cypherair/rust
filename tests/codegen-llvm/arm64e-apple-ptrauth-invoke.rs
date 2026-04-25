@@ -31,5 +31,6 @@ pub unsafe fn invoke_catch() -> i32 {
     unsafe { catch_unwind(try_fn, 0 as *mut u8, catch_fn) }
 }
 
-// CHECK: define {{.*}}@__rust_try(
+// CHECK: define internal i32 @__rust_try({{.*}}) unnamed_addr [[TRY_ATTR:#[0-9]+]] personality
 // CHECK: invoke void %{{.*}}(ptr %{{.*}}){{.*}} [ "ptrauth"(i32 0, i64 0) ]
+// CHECK: attributes [[TRY_ATTR]] = {{.*}} "ptrauth-auth-traps" "ptrauth-calls" "ptrauth-indirect-gotos" "ptrauth-returns"
