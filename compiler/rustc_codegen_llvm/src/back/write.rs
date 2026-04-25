@@ -1076,6 +1076,10 @@ pub(crate) fn codegen(
             );
             let out_c = path_to_c_string(&out);
 
+            if cgcx.target_is_apple_arm64e {
+                llvm::strip_unsupported_ptrauth_bundles(llmod);
+            }
+
             extern "C" fn demangle_callback(
                 input_ptr: *const c_char,
                 input_len: size_t,

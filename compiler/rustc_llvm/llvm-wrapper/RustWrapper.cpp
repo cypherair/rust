@@ -1,4 +1,5 @@
 #include "LLVMWrapper.h"
+#include "PtrauthUtils.h"
 
 #include "llvm-c/Analysis.h"
 #include "llvm-c/Core.h"
@@ -1591,39 +1592,7 @@ extern "C" uint64_t LLVMRustModuleInstructionStats(LLVMModuleRef M) {
 }
 
 extern "C" void LLVMRustStripUnsupportedPtrauthBundles(LLVMModuleRef M) {
-  Module *Mod = unwrap(M);
-  LLVMContext &Ctx = Mod->getContext();
-  const uint32_t PtrauthID = Ctx.getOperandBundleTagID("ptrauth");
-  SmallVector<CallBase *, 16> ToRewrite;
-
-  for (Function &F : *Mod) {
-    for (BasicBlock &BB : F) {
-      for (Instruction &I : BB) {
-        auto *CB = dyn_cast<CallBase>(&I);
-        if (!CB || !CB->countOperandBundlesOfType(PtrauthID))
-          continue;
-
-        bool ShouldStrip = isa<CallBrInst>(CB);
-        if (!ShouldStrip) {
-          Value *CalledOperand = CB->getCalledOperand()->stripPointerCasts();
-          if (auto *GV = dyn_cast<GlobalValue>(CalledOperand))
-            ShouldStrip = GV->getValueType()->isFunctionTy();
-        }
-
-        if (ShouldStrip)
-          ToRewrite.push_back(CB);
-      }
-    }
-  }
-
-  for (CallBase *CB : ToRewrite) {
-    CallBase *Replacement =
-        CallBase::removeOperandBundle(CB, PtrauthID, CB->getIterator());
-    Replacement->copyMetadata(*CB);
-    Replacement->setDebugLoc(CB->getDebugLoc());
-    CB->replaceAllUsesWith(Replacement);
-    CB->eraseFromParent();
-  }
+  rustc_llvm::stripUnsupportedPtrauthBundles(*unwrap(M));
 }
 
 // Transfers ownership of DiagnosticHandler unique_ptr to the caller.
