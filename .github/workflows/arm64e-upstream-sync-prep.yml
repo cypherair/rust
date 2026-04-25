@@ -1,0 +1,113 @@
+name: arm64e Upstream Sync Prep
+
+on:
+  workflow_dispatch:
+    inputs:
+      integration_branch:
+        description: CypherAir arm64e integration branch to inspect.
+        required: true
+        default: integration/arm64e-upstream-prs
+        type: string
+      upstream_ref:
+        description: Upstream Rust ref to merge in the dry-run workspace.
+        required: true
+        default: upstream/main
+        type: string
+      create_refresh_pr:
+        description: Push a refresh branch and open a draft PR when the dry-run merge succeeds.
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  sync-prep:
+    if: github.repository == 'cypherair/rust'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream and integration refs
+        env:
+          INTEGRATION_BRANCH: ${{ inputs.integration_branch }}
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/rust-lang/rust.git 2>/dev/null || git remote set-url upstream https://github.com/rust-lang/rust.git
+          git fetch --prune origin \
+            "+refs/heads/${INTEGRATION_BRANCH}:refs/remotes/origin/${INTEGRATION_BRANCH}" \
+            +refs/heads/main:refs/remotes/origin/main
+          git fetch --prune upstream +refs/heads/main:refs/remotes/upstream/main
+
+      - name: Report branch posture
+        env:
+          INTEGRATION_BRANCH: ${{ inputs.integration_branch }}
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## arm64e upstream sync prep"
+            echo
+            echo "- integration branch: \`${INTEGRATION_BRANCH}\`"
+            echo "- upstream ref: \`${UPSTREAM_REF}\`"
+            echo "- origin/main: \`$(git rev-parse refs/remotes/origin/main)\`"
+            echo "- upstream/main: \`$(git rev-parse refs/remotes/upstream/main)\`"
+            echo "- integration head: \`$(git rev-parse refs/remotes/origin/${INTEGRATION_BRANCH})\`"
+            echo "- origin/main...upstream/main: \`$(git rev-list --left-right --count refs/remotes/origin/main...refs/remotes/upstream/main)\`"
+            echo "- integration...upstream: \`$(git rev-list --left-right --count refs/remotes/origin/${INTEGRATION_BRANCH}...${UPSTREAM_REF})\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry-run merge upstream into integration branch
+        id: dry_run
+        env:
+          INTEGRATION_BRANCH: ${{ inputs.integration_branch }}
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B arm64e-sync-dry-run "refs/remotes/origin/${INTEGRATION_BRANCH}"
+          if git merge --no-ff --no-commit "$UPSTREAM_REF"; then
+            echo "merge_ok=true" >> "$GITHUB_OUTPUT"
+            git diff --stat --cached || true
+            git merge --abort || true
+          else
+            echo "merge_ok=false" >> "$GITHUB_OUTPUT"
+            git status --short
+            exit 1
+          fi
+
+      - name: Create refresh branch and draft PR
+        id: refresh
+        if: ${{ inputs.create_refresh_pr && steps.dry_run.outputs.merge_ok == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INTEGRATION_BRANCH: ${{ inputs.integration_branch }}
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="$(git rev-parse --short=7 "refs/remotes/origin/${INTEGRATION_BRANCH}")"
+          REFRESH_BRANCH="automation/arm64e-refresh-$(date -u +"%Y%m%dT%H%M%SZ")-${SHORT_SHA}"
+
+          git checkout -B "$REFRESH_BRANCH" "refs/remotes/origin/${INTEGRATION_BRANCH}"
+          git merge --no-ff "$UPSTREAM_REF" -m "Merge ${UPSTREAM_REF} into ${INTEGRATION_BRANCH}"
+          git push origin "HEAD:refs/heads/${REFRESH_BRANCH}"
+
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base "$INTEGRATION_BRANCH" \
+            --head "$REFRESH_BRANCH" \
+            --title "[automation] Refresh arm64e integration branch from ${UPSTREAM_REF}" \
+            --body "Automated dry-run refresh branch for CypherAir arm64e Rust integration. This PR intentionally targets the integration branch and does not force-push it." \
+            --draft
+
+          echo "REFRESH_BRANCH=$REFRESH_BRANCH" >> "$GITHUB_ENV"
+          echo "branch=$REFRESH_BRANCH" >> "$GITHUB_OUTPUT"
