@@ -18,12 +18,6 @@ on:
         required: true
         default: false
         type: boolean
-      dispatch_stage1_prerelease:
-        description: Dispatch arm64e stage1 prerelease for the refresh branch.
-        required: true
-        default: false
-        type: boolean
-
 permissions:
   contents: write
   pull-requests: write
@@ -117,14 +111,3 @@ jobs:
 
           echo "REFRESH_BRANCH=$REFRESH_BRANCH" >> "$GITHUB_ENV"
           echo "branch=$REFRESH_BRANCH" >> "$GITHUB_OUTPUT"
-
-      - name: Dispatch stage1 prerelease for refresh branch
-        if: ${{ inputs.dispatch_stage1_prerelease && inputs.create_refresh_pr && steps.refresh.outputs.branch != '' }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          gh workflow run arm64e-stage1-prerelease.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            -f source_ref="${{ steps.refresh.outputs.branch }}" \
-            -f release_tag_prefix=rust-arm64e-stage1-refresh \
-            -f create_release=true
