@@ -1213,7 +1213,7 @@ pub(crate) struct ForbiddenCTargetFeature<'a> {
 
 #[derive(Diagnostic)]
 #[diag(
-    "`-Ctarget-feature` cannot disable `paca` or `pacg` on arm64e Apple targets because they enable ptrauth by default"
+    "`-Ctarget-feature` cannot disable `paca`, `pacg`, or LLVM `pauth` on arm64e Apple targets because they enable ptrauth by default"
 )]
 pub(crate) struct Arm64eApplePtrauthDisableForbidden;
 
