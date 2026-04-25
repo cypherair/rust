@@ -1807,6 +1807,9 @@ extern "C" bool LLVMRustIsNonGVFunctionPointerTy(LLVMValueRef V) {
   if (!Stripped->getType()->isPointerTy())
     return false;
 
+  if (isa<InlineAsm>(Stripped))
+    return false;
+
   if (auto *GV = dyn_cast<GlobalValue>(Stripped)) {
     if (GV->getValueType()->isFunctionTy())
       return false;
