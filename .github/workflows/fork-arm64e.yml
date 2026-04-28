@@ -1,0 +1,64 @@
+name: Fork arm64e validation
+
+# Fork-only CypherAir validation. Drop this workflow before proposing the
+# upstreamable arm64e prep patches to rust-lang/rust.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - integration/arm64e-upstream-prs
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-arm64e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prep:
+    if: github.repository == 'cypherair/rust'
+    name: arm64e prep validation
+    runs-on: macos-15
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          submodules: recursive
+
+      # CypherAir fork push runs reproduced a shallow-clone case where bootstrap could not
+      # safely treat HEAD^1 as the upstream nightly base commit. Keep this in sync with src/stage0.
+      - name: Fetch nightly base ref
+        run: |
+          git fetch --no-tags --prune --depth=1 origin \
+            +refs/heads/main:refs/remotes/origin/main
+
+      - name: Show environment
+        run: |
+          sw_vers
+          uname -a
+          git show -s --format='HEAD: %H %P %ae %s' HEAD
+          git show -s --format='origin/main: %H %P %ae %s' refs/remotes/origin/main
+          python3 --version
+
+      - name: Check metadata codegen crate
+        run: |
+          python3 x.py check compiler/rustc_codegen_ssa --stage 1
+
+      - name: Run Mach-O metadata subtype test
+        run: |
+          python3 x.py test --stage 1 --force-rerun \
+            tests/run-make/arm64e-macho-metadata-subtype
+
+      - name: Run bootstrap tests
+        run: |
+          python3 x.py test src/bootstrap --stage 1
