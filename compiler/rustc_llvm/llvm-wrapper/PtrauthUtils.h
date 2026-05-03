@@ -3,7 +3,6 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
@@ -26,14 +25,10 @@ inline bool stripUnsupportedPtrauthBundles(llvm::Module &Mod) {
         if (!CB || !CB->countOperandBundlesOfType(PtrauthID))
           continue;
 
-        bool ShouldStrip = llvm::isa<llvm::CallBrInst>(CB);
-        if (!ShouldStrip) {
-          llvm::Value *CalledOperand = CB->getCalledOperand()->stripPointerCasts();
-          if (auto *GV = llvm::dyn_cast<llvm::GlobalValue>(CalledOperand))
-            ShouldStrip = GV->getValueType()->isFunctionTy();
-        }
-
-        if (ShouldStrip)
+        // LLVM still does not lower ptrauth bundles on callbr. Direct-call
+        // bundles should be prevented by LLVM canonicalization instead of
+        // repaired here before serialization.
+        if (llvm::isa<llvm::CallBrInst>(CB))
           ToRewrite.push_back(CB);
       }
     }
