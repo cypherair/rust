@@ -212,6 +212,39 @@ jobs:
           /usr/bin/file /tmp/arm64e-stage1-diagnostics/hello | tee /tmp/arm64e-stage1-diagnostics/hello-file.txt
           /tmp/arm64e-stage1-diagnostics/hello | tee /tmp/arm64e-stage1-diagnostics/hello-run.txt
 
+          SMOKE_ROOT="/tmp/arm64e-stage1-diagnostics/generic-array-smoke"
+          STAGE1_RUSTC="$PWD/dist/stage1-arm64e-patch/bin/rustc"
+          rm -rf "$SMOKE_ROOT"
+          mkdir -p "$SMOKE_ROOT/src"
+          cat > "$SMOKE_ROOT/Cargo.toml" <<'EOF'
+          [package]
+          name = "generic-array-arm64e-smoke"
+          version = "0.0.0"
+          edition = "2021"
+
+          [dependencies]
+          generic-array = "=1.4.1"
+          rustversion = "=1.0.22"
+          EOF
+          cat > "$SMOKE_ROOT/src/main.rs" <<'EOF'
+          use generic_array::{typenum::U16, GenericArray};
+
+          fn main() {
+              let mut bytes = GenericArray::<u8, U16>::default();
+              bytes[0] = 42;
+              println!("{}", bytes[0]);
+          }
+          EOF
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly generate-lockfile --manifest-path "$SMOKE_ROOT/Cargo.toml"
+          env \
+            CARGO_TARGET_DIR="$SMOKE_ROOT/target" \
+            RUSTC="$STAGE1_RUSTC" \
+            cargo +nightly build --locked -Zbuild-std \
+              --target arm64e-apple-darwin \
+              --manifest-path "$SMOKE_ROOT/Cargo.toml" \
+            2>&1 | tee /tmp/arm64e-stage1-diagnostics/generic-array-smoke.log
+
           bsdtar -cf - -C dist stage1-arm64e-patch | zstd -T0 -19 -o "${ASSET_BASE}.tar.zst"
           shasum -a 256 "${ASSET_BASE}.tar.zst" > "${ASSET_BASE}.sha256"
 
