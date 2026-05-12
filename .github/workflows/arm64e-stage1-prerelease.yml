@@ -237,13 +237,16 @@ jobs:
           EOF
           rustup toolchain install nightly --profile minimal
           cargo +nightly generate-lockfile --manifest-path "$SMOKE_ROOT/Cargo.toml"
-          env \
-            CARGO_TARGET_DIR="$SMOKE_ROOT/target" \
-            RUSTC="$STAGE1_RUSTC" \
-            cargo +nightly build --locked -Zbuild-std \
-              --target arm64e-apple-darwin \
-              --manifest-path "$SMOKE_ROOT/Cargo.toml" \
-            2>&1 | tee /tmp/arm64e-stage1-diagnostics/generic-array-smoke.log
+          for smoke_target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-visionos; do
+            echo "=== generic-array smoke: ${smoke_target} ==="
+            env \
+              CARGO_TARGET_DIR="$SMOKE_ROOT/target-${smoke_target}" \
+              RUSTC="$STAGE1_RUSTC" \
+              cargo +nightly build --locked -Zbuild-std \
+                --target "$smoke_target" \
+                --manifest-path "$SMOKE_ROOT/Cargo.toml" \
+              2>&1 | tee "/tmp/arm64e-stage1-diagnostics/generic-array-smoke-${smoke_target}.log"
+          done
 
           bsdtar -cf - -C dist stage1-arm64e-patch | zstd -T0 -19 -o "${ASSET_BASE}.tar.zst"
           shasum -a 256 "${ASSET_BASE}.tar.zst" > "${ASSET_BASE}.sha256"
