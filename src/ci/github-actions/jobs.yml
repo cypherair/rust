@@ -145,6 +145,9 @@ pr:
   - name: x86_64-gnu-gcc
     doc_url: https://rustc-dev-guide.rust-lang.org/tests/codegen-backend-tests/cg_gcc.html
     <<: *job-linux-4c
+  - name: x86_64-gnu-gcc-core-tests
+    doc_url: https://rustc-dev-guide.rust-lang.org/tests/codegen-backend-tests/cg_gcc.html
+    <<: *job-linux-4c
 
 # Jobs that run when you perform a try build (@bors try)
 # These jobs automatically inherit envs.try, to avoid repeating
@@ -261,6 +264,9 @@ auto:
   - name: dist-x86_64-freebsd
     <<: *job-linux-4c
 
+  - name: dist-aarch64-freebsd
+    <<: *job-aarch64-linux
+
   - name: dist-x86_64-illumos
     <<: *job-linux-4c
 
@@ -356,6 +362,10 @@ auto:
     <<: *job-linux-4c
 
   - name: x86_64-gnu-gcc
+    doc_url: https://rustc-dev-guide.rust-lang.org/tests/codegen-backend-tests/cg_gcc.html
+    <<: *job-linux-4c
+
+  - name: x86_64-gnu-gcc-core-tests
     doc_url: https://rustc-dev-guide.rust-lang.org/tests/codegen-backend-tests/cg_gcc.html
     <<: *job-linux-4c
 
