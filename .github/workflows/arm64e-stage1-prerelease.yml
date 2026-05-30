@@ -6,12 +6,12 @@ on:
       source_ref:
         description: Branch, tag, or SHA to build.
         required: true
-        default: carry/cypherair-arm64e-toolchain
+        default: carry/cypherair-arm64e-toolchain-stable-1.96
         type: string
       release_tag_prefix:
         description: Unique release tag prefix.
         required: true
-        default: rust-arm64e-stage1
+        default: rust-arm64e-stage1-stable196
         type: string
       create_release:
         description: Publish the GitHub prerelease instead of uploading dry-run artifacts.
@@ -20,7 +20,7 @@ on:
         type: boolean
   push:
     branches:
-      - carry/cypherair-arm64e-toolchain
+      - carry/cypherair-arm64e-toolchain-stable-1.96
   schedule:
     - cron: "17 10 * * 1"
 
@@ -35,7 +35,10 @@ concurrency:
 
 env:
   ASSET_BASE: rust-stage1-arm64e-apple-darwin
-  INTEGRATION_BRANCH: carry/cypherair-arm64e-toolchain
+  INTEGRATION_BRANCH: carry/cypherair-arm64e-toolchain-stable-1.96
+  RELEASE_TAG_PREFIX_DEFAULT: rust-arm64e-stage1-stable196
+  STABLE_BASE_RELEASE: "1.96.0"
+  STABLE_BASE_COMMIT: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96
 
 jobs:
   publish-stage1:
@@ -58,17 +61,17 @@ jobs:
           case "$GITHUB_EVENT_NAME" in
             workflow_dispatch)
               SOURCE_REF="${INPUT_SOURCE_REF:-$INTEGRATION_BRANCH}"
-              RELEASE_TAG_PREFIX="${INPUT_RELEASE_TAG_PREFIX:-rust-arm64e-stage1}"
+              RELEASE_TAG_PREFIX="${INPUT_RELEASE_TAG_PREFIX:-$RELEASE_TAG_PREFIX_DEFAULT}"
               CREATE_RELEASE="${INPUT_CREATE_RELEASE:-true}"
               ;;
             push)
               SOURCE_REF="$GITHUB_REF"
-              RELEASE_TAG_PREFIX="rust-arm64e-stage1"
+              RELEASE_TAG_PREFIX="$RELEASE_TAG_PREFIX_DEFAULT"
               CREATE_RELEASE="true"
               ;;
             schedule)
               SOURCE_REF="$INTEGRATION_BRANCH"
-              RELEASE_TAG_PREFIX="rust-arm64e-stage1"
+              RELEASE_TAG_PREFIX="$RELEASE_TAG_PREFIX_DEFAULT"
               CREATE_RELEASE="true"
               ;;
             *)
@@ -102,22 +105,32 @@ jobs:
           ref: ${{ steps.settings.outputs.source_ref }}
           submodules: recursive
 
-      - name: Select Xcode 26.4.1
+      - name: Select Xcode 26.5
         run: |
           set -euo pipefail
 
-          if [ -n "${XCODE_26_DEVELOPER_DIR:-}" ] && [ -d "${XCODE_26_DEVELOPER_DIR}" ]; then
-            SELECTED_DEVELOPER_DIR="${XCODE_26_DEVELOPER_DIR}"
-          elif [ -d "/Applications/Xcode_26.4.1.app/Contents/Developer" ]; then
-            SELECTED_DEVELOPER_DIR="/Applications/Xcode_26.4.1.app/Contents/Developer"
+          if [ -n "${XCODE_26_5_DEVELOPER_DIR:-}" ] && [ -d "${XCODE_26_5_DEVELOPER_DIR}" ]; then
+            SELECTED_DEVELOPER_DIR="${XCODE_26_5_DEVELOPER_DIR}"
+          elif [ -d "/Applications/Xcode_26.5.app/Contents/Developer" ]; then
+            SELECTED_DEVELOPER_DIR="/Applications/Xcode_26.5.app/Contents/Developer"
+          elif [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+            SELECTED_DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
           else
-            echo "::error::Xcode 26.4.1 was not found on this runner."
+            echo "::error::Xcode 26.5 was not found on this runner."
             exit 1
           fi
 
           echo "DEVELOPER_DIR=${SELECTED_DEVELOPER_DIR}" >> "$GITHUB_ENV"
           export DEVELOPER_DIR="${SELECTED_DEVELOPER_DIR}"
-          xcodebuild -version
+          XCODE_VERSION="$(xcodebuild -version | tr '\n' ' ' | sed 's/  */ /g; s/ $//')"
+          echo "$XCODE_VERSION"
+          case "$XCODE_VERSION" in
+            Xcode\ 26.5*) ;;
+            *)
+              echo "::error::Expected Xcode 26.5, got: ${XCODE_VERSION}"
+              exit 1
+              ;;
+          esac
 
       - name: Fetch fork main for bootstrap ancestry checks
         run: |
@@ -156,7 +169,8 @@ jobs:
         run: |
           set -euo pipefail
           HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
-          python3 x.py build compiler/rustc library/std library/proc_macro --stage 1 --target "${HOST_TRIPLE},arm64e-apple-darwin"
+          ARM64E_TARGETS="arm64e-apple-darwin,arm64e-apple-ios,arm64e-apple-tvos,arm64e-apple-visionos"
+          python3 x.py build compiler/rustc library/std library/proc_macro --stage 1 --target "${HOST_TRIPLE},${ARM64E_TARGETS}"
 
       - name: Package minimal stage1 toolchain
         run: |
@@ -190,12 +204,23 @@ jobs:
           test -d "$RUST_SRC_DEST/src/llvm-project/libunwind"
           du -sh "$RUST_SRC_DEST" | tee /tmp/arm64e-stage1-diagnostics/rust-src-size.txt
 
+          PREBUILT_STD_TARGETS=(
+            "$HOST_TRIPLE"
+            arm64e-apple-darwin
+            arm64e-apple-ios
+            arm64e-apple-tvos
+            arm64e-apple-visionos
+          )
+
           "./dist/stage1-arm64e-patch/bin/rustc" --print target-list | tee /tmp/arm64e-stage1-diagnostics/target-list.txt
           for target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
             grep -qx "$target" /tmp/arm64e-stage1-diagnostics/target-list.txt
           done
+          for target in "${PREBUILT_STD_TARGETS[@]}"; do
+            LIBDIR="$(./dist/stage1-arm64e-patch/bin/rustc --print target-libdir --target "$target")"
+            test -n "$(find "$LIBDIR" -maxdepth 1 -name 'libstd-*.rlib' -print -quit)"
+          done
           HOST_LIBDIR="$(./dist/stage1-arm64e-patch/bin/rustc --print target-libdir --target "$HOST_TRIPLE")"
-          test -n "$(find "$HOST_LIBDIR" -maxdepth 1 -name 'libstd-*.rlib' -print -quit)"
           test -n "$(find "$HOST_LIBDIR" -maxdepth 1 -name 'libproc_macro-*.rlib' -print -quit)"
           test -d "$(./dist/stage1-arm64e-patch/bin/rustc --print sysroot)/lib/rustlib/src/rust/library"
 
@@ -235,14 +260,14 @@ jobs:
               println!("{}", bytes[0]);
           }
           EOF
-          rustup toolchain install nightly --profile minimal
-          cargo +nightly generate-lockfile --manifest-path "$SMOKE_ROOT/Cargo.toml"
-          for smoke_target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-visionos; do
+          rustup toolchain install stable --profile minimal
+          cargo +stable generate-lockfile --manifest-path "$SMOKE_ROOT/Cargo.toml"
+          for smoke_target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
             echo "=== generic-array smoke: ${smoke_target} ==="
             env \
               CARGO_TARGET_DIR="$SMOKE_ROOT/target-${smoke_target}" \
               RUSTC="$STAGE1_RUSTC" \
-              cargo +nightly build --locked -Zbuild-std \
+              cargo +stable build --locked \
                 --target "$smoke_target" \
                 --manifest-path "$SMOKE_ROOT/Cargo.toml" \
               2>&1 | tee "/tmp/arm64e-stage1-diagnostics/generic-array-smoke-${smoke_target}.log"
@@ -272,6 +297,9 @@ jobs:
               "sourceCommit": "${GITHUB_SHA}",
               "checkedOutCommit": "$(git rev-parse HEAD)",
               "forkMainCommit": "${UPSTREAM_MAIN_SHA}",
+              "stableBaseRelease": "${STABLE_BASE_RELEASE}",
+              "stableBaseCommit": "${STABLE_BASE_COMMIT}",
+              "requiresBuildStd": False,
               "hostTriple": "${HOST_TRIPLE}",
               "includedHostStdTarget": "${HOST_TRIPLE}",
               "includedRustSrc": True,
@@ -285,6 +313,13 @@ jobs:
                   "sha256FileName": "${ASSET_BASE}.sha256",
                   "sizeBytes": int("${TOOLCHAIN_SIZE_BYTES}"),
               },
+              "includedPrebuiltStdTargets": [
+                  "${HOST_TRIPLE}",
+                  "arm64e-apple-darwin",
+                  "arm64e-apple-ios",
+                  "arm64e-apple-tvos",
+                  "arm64e-apple-visionos",
+              ],
               "includedAppleArm64eTargets": [
                   "arm64e-apple-darwin",
                   "arm64e-apple-ios",
@@ -311,6 +346,8 @@ jobs:
 
           - Source ref: \`$SOURCE_REF\`
           - Commit: \`$(git rev-parse HEAD)\`
+          - Stable base: \`${STABLE_BASE_RELEASE}\` / \`${STABLE_BASE_COMMIT}\`
+          - Requires \`-Zbuild-std\`: \`false\`
           - Workflow: [$WORKFLOW_URL]($WORKFLOW_URL)
           - Xcode: \`$(xcodebuild -version | tr '\n' ' ' | sed 's/  */ /g; s/ $//')\`
 
