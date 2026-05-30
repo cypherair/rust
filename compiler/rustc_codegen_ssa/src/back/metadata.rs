@@ -39,6 +39,8 @@ use super::apple;
 pub(crate) struct DefaultMetadataLoader;
 
 static AIX_METADATA_SYMBOL_NAME: &'static str = "__aix_rust_metadata";
+// Keep metadata objects compatible with LLVM's arm64e Mach-O header promotion.
+const CPU_SUBTYPE_ARM64E_VERSIONED_PTRAUTH_ABI: u32 = 0x8000_0000;
 
 fn load_metadata_with(
     path: &Path,
@@ -216,7 +218,9 @@ pub(crate) fn create_object_file(sess: &Session) -> Option<write::Object<'static
     file.set_sub_architecture(sub_architecture);
     if sess.target.is_like_darwin {
         if macho_is_arm64e(&sess.target) {
-            file.set_macho_cpu_subtype(object::macho::CPU_SUBTYPE_ARM64E);
+            file.set_macho_cpu_subtype(
+                object::macho::CPU_SUBTYPE_ARM64E | CPU_SUBTYPE_ARM64E_VERSIONED_PTRAUTH_ABI,
+            );
         }
 
         file.set_macho_build_version(macho_object_build_version_for_target(sess))
