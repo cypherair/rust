@@ -467,6 +467,8 @@ jobs:
           merge-multiple: true
 
       - name: Verify host artifacts and generate release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -512,6 +514,12 @@ jobs:
               jq -e --arg target "$target" '.includedAppleArm64eTargets | index($target)' "$manifest" >/dev/null
               jq -e --arg target "$target" '.includedPrebuiltStdTargets | index($target)' "$manifest" >/dev/null
             done
+            for attested in "$asset" "$sha" "$manifest" "$diagnostics"; do
+              gh attestation verify "$attested" \
+                -R "$GITHUB_REPOSITORY" \
+                --source-ref "$SOURCE_REF" \
+                --source-digest "$CHECKED_OUT_COMMIT"
+            done
 
             {
               echo "- \`${asset}\`"
@@ -531,7 +539,7 @@ jobs:
               sha="${STAGE1_ASSET_PREFIX}-${host_triple}.sha256"
               echo "shasum -a 256 -c ${sha}"
               echo "gh release verify-asset \"$RELEASE_TAG\" ${asset} -R \"$GITHUB_REPOSITORY\""
-              echo "gh attestation verify ${asset} -R \"$GITHUB_REPOSITORY\" --source-ref \"$SOURCE_REF\""
+              echo "gh attestation verify ${asset} -R \"$GITHUB_REPOSITORY\" --source-ref \"$SOURCE_REF\" --source-digest \"$CHECKED_OUT_COMMIT\""
             done
             echo '```'
           } >> ../release-notes.md
@@ -577,16 +585,29 @@ jobs:
             rust-stage1-for-arm64e-x86_64-apple-darwin.json \
             arm64e-stage1-diagnostics-x86_64-apple-darwin.tar.zst
 
-      - name: Verify uploaded assets and attestations
+      - name: Verify uploaded asset list
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cd stage1-artifacts
-          for host_triple in aarch64-apple-darwin x86_64-apple-darwin; do
-            asset="${STAGE1_ASSET_PREFIX}-${host_triple}.tar.zst"
-            gh release verify-asset "$RELEASE_TAG" "$asset" -R "$GITHUB_REPOSITORY"
-            gh attestation verify "$asset" -R "$GITHUB_REPOSITORY" --source-ref "$SOURCE_REF"
+
+          expected_assets=(
+            rust-stage1-for-arm64e-aarch64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-aarch64-apple-darwin.sha256
+            rust-stage1-for-arm64e-aarch64-apple-darwin.json
+            arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-x86_64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-x86_64-apple-darwin.sha256
+            rust-stage1-for-arm64e-x86_64-apple-darwin.json
+            arm64e-stage1-diagnostics-x86_64-apple-darwin.tar.zst
+          )
+          gh release view "$RELEASE_TAG" \
+            -R "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets[].name' > uploaded-assets.txt
+          for expected_asset in "${expected_assets[@]}"; do
+            grep -Fx "$expected_asset" uploaded-assets.txt >/dev/null
           done
 
       - name: Publish draft prerelease
@@ -594,6 +615,41 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+
+      - name: Verify published release asset attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd stage1-artifacts
+
+          release_assets=(
+            rust-stage1-for-arm64e-aarch64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-aarch64-apple-darwin.sha256
+            rust-stage1-for-arm64e-aarch64-apple-darwin.json
+            arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-x86_64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-x86_64-apple-darwin.sha256
+            rust-stage1-for-arm64e-x86_64-apple-darwin.json
+            arm64e-stage1-diagnostics-x86_64-apple-darwin.tar.zst
+          )
+
+          for attempt in {1..12}; do
+            all_verified=1
+            for release_asset in "${release_assets[@]}"; do
+              if ! gh release verify-asset "$RELEASE_TAG" "$release_asset" -R "$GITHUB_REPOSITORY"; then
+                all_verified=0
+                break
+              fi
+            done
+            if [ "$all_verified" -eq 1 ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "::error::Published release asset attestations were not available for ${RELEASE_TAG}."
+          exit 1
 
       - name: Cleanup failed draft release/tag
         if: ${{ failure() }}
@@ -604,8 +660,7 @@ jobs:
           if [ -z "${RELEASE_TAG:-}" ]; then
             exit 0
           fi
-          release_is_draft="$(gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null)"
-          if [ "$release_is_draft" = "true" ]; then
+          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release delete "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --cleanup-tag --yes
             exit 0
           fi
