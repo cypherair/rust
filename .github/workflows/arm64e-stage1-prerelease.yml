@@ -1,0 +1,667 @@
+name: arm64e Stage1 Prerelease
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag, or SHA to build.
+        required: true
+        default: carry/cypherair-arm64e-toolchain-stable-1.97
+        type: string
+      release_tag_prefix:
+        description: Unique release tag prefix.
+        required: true
+        default: rust-arm64e-stage1-stable197
+        type: string
+      create_release:
+        description: Publish the GitHub prerelease instead of uploading dry-run artifacts.
+        required: true
+        default: false
+        type: boolean
+  push:
+    branches:
+      - carry/cypherair-arm64e-toolchain-stable-1.97
+  schedule:
+    - cron: "17 10 * * 1"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: arm64e-stage1-prerelease-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  INTEGRATION_BRANCH: carry/cypherair-arm64e-toolchain-stable-1.97
+  RELEASE_TAG_PREFIX_DEFAULT: rust-arm64e-stage1-stable197
+  STABLE_BASE_RELEASE: "1.97.1"
+  STABLE_BASE_COMMIT: 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+  STAGE1_ASSET_PREFIX: rust-stage1-for-arm64e
+
+jobs:
+  resolve-release:
+    if: github.repository == 'cypherair/rust'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      source_ref: ${{ steps.resolve.outputs.source_ref }}
+      release_tag_prefix: ${{ steps.resolve.outputs.release_tag_prefix }}
+      create_release: ${{ steps.resolve.outputs.create_release }}
+      checked_out_commit: ${{ steps.metadata.outputs.checked_out_commit }}
+      release_tag: ${{ steps.metadata.outputs.release_tag }}
+      release_title: ${{ steps.metadata.outputs.release_title }}
+      release_url: ${{ steps.metadata.outputs.release_url }}
+      workflow_url: ${{ steps.metadata.outputs.workflow_url }}
+    steps:
+      - name: Resolve release settings
+        id: resolve
+        env:
+          INPUT_SOURCE_REF: ${{ github.event.inputs.source_ref }}
+          INPUT_RELEASE_TAG_PREFIX: ${{ github.event.inputs.release_tag_prefix }}
+          INPUT_CREATE_RELEASE: ${{ github.event.inputs.create_release }}
+        run: |
+          set -euo pipefail
+
+          case "$GITHUB_EVENT_NAME" in
+            workflow_dispatch)
+              SOURCE_REF="${INPUT_SOURCE_REF:-$INTEGRATION_BRANCH}"
+              RELEASE_TAG_PREFIX="${INPUT_RELEASE_TAG_PREFIX:-$RELEASE_TAG_PREFIX_DEFAULT}"
+              CREATE_RELEASE="${INPUT_CREATE_RELEASE:-false}"
+              ;;
+            push)
+              SOURCE_REF="$GITHUB_REF"
+              RELEASE_TAG_PREFIX="$RELEASE_TAG_PREFIX_DEFAULT"
+              CREATE_RELEASE="false"
+              ;;
+            schedule)
+              SOURCE_REF="refs/heads/$INTEGRATION_BRANCH"
+              RELEASE_TAG_PREFIX="$RELEASE_TAG_PREFIX_DEFAULT"
+              CREATE_RELEASE="false"
+              ;;
+            *)
+              echo "::error::Unsupported event: $GITHUB_EVENT_NAME"
+              exit 1
+              ;;
+          esac
+
+          case "$RELEASE_TAG_PREFIX" in
+            *[!A-Za-z0-9._-]*)
+              echo "::error::release_tag_prefix may only contain letters, numbers, dots, underscores, and hyphens."
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "source_ref=$SOURCE_REF"
+            echo "release_tag_prefix=$RELEASE_TAG_PREFIX"
+            echo "create_release=$CREATE_RELEASE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          ref: ${{ steps.resolve.outputs.source_ref }}
+
+      - name: Resolve release metadata
+        id: metadata
+        env:
+          RELEASE_TAG_PREFIX: ${{ steps.resolve.outputs.release_tag_prefix }}
+        run: |
+          set -euo pipefail
+
+          CHECKED_OUT_COMMIT="$(git rev-parse HEAD)"
+          RELEASE_TIMESTAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
+          SHORT_SHA="$(git rev-parse --short=7 HEAD)"
+          RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT:-1}"
+          RELEASE_TAG="${RELEASE_TAG_PREFIX}-${RELEASE_TIMESTAMP}-${SHORT_SHA}-r${GITHUB_RUN_ID}-a${RUN_ATTEMPT}"
+          RELEASE_TITLE="Rust arm64e stage1 toolchains (${RELEASE_TAG})"
+          RELEASE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
+          WORKFLOW_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          {
+            echo "checked_out_commit=$CHECKED_OUT_COMMIT"
+            echo "release_tag=$RELEASE_TAG"
+            echo "release_title=$RELEASE_TITLE"
+            echo "release_url=$RELEASE_URL"
+            echo "workflow_url=$WORKFLOW_URL"
+          } >> "$GITHUB_OUTPUT"
+
+  build-stage1:
+    if: github.repository == 'cypherair/rust'
+    needs: resolve-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner_label: macos-26
+            expected_host_triple: aarch64-apple-darwin
+          - runner_label: macos-26-intel
+            expected_host_triple: x86_64-apple-darwin
+    name: build-stage1 (${{ matrix.expected_host_triple }})
+    runs-on: ${{ matrix.runner_label }}
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    env:
+      SOURCE_REF: ${{ needs.resolve-release.outputs.source_ref }}
+      CREATE_RELEASE: ${{ needs.resolve-release.outputs.create_release }}
+      RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
+      RELEASE_URL: ${{ needs.resolve-release.outputs.release_url }}
+      WORKFLOW_URL: ${{ needs.resolve-release.outputs.workflow_url }}
+      CHECKED_OUT_COMMIT: ${{ needs.resolve-release.outputs.checked_out_commit }}
+      EXPECTED_HOST_TRIPLE: ${{ matrix.expected_host_triple }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          ref: ${{ needs.resolve-release.outputs.source_ref }}
+          submodules: recursive
+
+      - name: Select Xcode 26.5
+        run: |
+          set -euo pipefail
+
+          if [ -n "${XCODE_26_5_DEVELOPER_DIR:-}" ] && [ -d "${XCODE_26_5_DEVELOPER_DIR}" ]; then
+            SELECTED_DEVELOPER_DIR="${XCODE_26_5_DEVELOPER_DIR}"
+          elif [ -d "/Applications/Xcode_26.5.app/Contents/Developer" ]; then
+            SELECTED_DEVELOPER_DIR="/Applications/Xcode_26.5.app/Contents/Developer"
+          elif [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+            SELECTED_DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+          else
+            echo "::error::Xcode 26.5 was not found on this runner."
+            exit 1
+          fi
+
+          echo "DEVELOPER_DIR=${SELECTED_DEVELOPER_DIR}" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="${SELECTED_DEVELOPER_DIR}"
+          XCODE_VERSION="$(xcodebuild -version | tr '\n' ' ' | sed 's/  */ /g; s/ $//')"
+          echo "$XCODE_VERSION"
+          case "$XCODE_VERSION" in
+            Xcode\ 26.5*) ;;
+            *)
+              echo "::error::Expected Xcode 26.5, got: ${XCODE_VERSION}"
+              exit 1
+              ;;
+          esac
+
+      - name: Fetch fork main for bootstrap ancestry checks
+        run: |
+          git fetch --no-tags --prune --depth=1 origin \
+            +refs/heads/main:refs/remotes/origin/main
+
+      - name: Show runner and source environment
+        run: |
+          set -euo pipefail
+          mkdir -p "/tmp/arm64e-stage1-diagnostics-${EXPECTED_HOST_TRIPLE}"
+          {
+            echo "event=${GITHUB_EVENT_NAME}"
+            echo "source_ref=${SOURCE_REF}"
+            echo "expected_host_triple=${EXPECTED_HOST_TRIPLE}"
+            sw_vers
+            uname -a
+            df -h
+            git show -s --format='HEAD: %H %P %ae %s' HEAD
+            git show -s --format='origin/main: %H %P %ae %s' refs/remotes/origin/main
+            python3 --version
+            clang --version
+            rustc -vV || true
+          } | tee "/tmp/arm64e-stage1-diagnostics-${EXPECTED_HOST_TRIPLE}/runner-fingerprint.txt"
+
+      - name: Assert host triple
+        run: |
+          set -euo pipefail
+
+          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+          if [ "$HOST_TRIPLE" != "$EXPECTED_HOST_TRIPLE" ]; then
+            echo "::error::Expected host triple ${EXPECTED_HOST_TRIPLE}, got ${HOST_TRIPLE}"
+            exit 1
+          fi
+
+          ASSET_BASE="${STAGE1_ASSET_PREFIX}-${HOST_TRIPLE}"
+          DIAGNOSTICS_ASSET="arm64e-stage1-diagnostics-${HOST_TRIPLE}.tar.zst"
+          {
+            echo "HOST_TRIPLE=$HOST_TRIPLE"
+            echo "ASSET_BASE=$ASSET_BASE"
+            echo "DIAGNOSTICS_ASSET=$DIAGNOSTICS_ASSET"
+          } >> "$GITHUB_ENV"
+
+      - name: Run targeted arm64e validation
+        run: |
+          set -euo pipefail
+          python3 x.py check compiler/rustc_codegen_ssa compiler/rustc_codegen_llvm --stage 1
+          python3 x.py test --stage 1 --force-rerun \
+            tests/codegen-llvm/arm64e-apple-ptrauth*.rs \
+            tests/assembly-llvm/arm64e-apple-ptrauth-calls.rs \
+            tests/assembly-llvm/targets/targets-macho.rs \
+            tests/ui/compile-flags/invalid/branch-protection-arm64e-apple-pac-ret.rs \
+            tests/ui/compile-flags/invalid/target-feature-arm64e-apple-ptrauth-disable.rs
+
+      - name: Build stage1 compiler and Apple std payload
+        run: |
+          set -euo pipefail
+          ARM64E_TARGETS="arm64e-apple-darwin,arm64e-apple-ios,arm64e-apple-tvos,arm64e-apple-visionos"
+          python3 x.py build compiler/rustc library/std library/proc_macro --stage 1 --target "${HOST_TRIPLE},${ARM64E_TARGETS}"
+
+      - name: Package minimal stage1 toolchain
+        run: |
+          set -euo pipefail
+
+          STAGE1="build/${HOST_TRIPLE}/stage1"
+          DIAGNOSTICS_DIR="/tmp/arm64e-stage1-diagnostics-${HOST_TRIPLE}"
+          if [ ! -x "$STAGE1/bin/rustc" ]; then
+            echo "::error::stage1 rustc missing at $STAGE1/bin/rustc"
+            exit 1
+          fi
+
+          mkdir -p dist/stage1-arm64e-patch
+          rsync -a --delete "$STAGE1/" dist/stage1-arm64e-patch/
+          find dist/stage1-arm64e-patch -name '*.dSYM' -prune -exec rm -rf {} +
+
+          RUST_SRC_DEST="dist/stage1-arm64e-patch/lib/rustlib/src/rust"
+          rm -rf "$RUST_SRC_DEST"
+          mkdir -p "$RUST_SRC_DEST/src/llvm-project"
+          rsync -a --delete library "$RUST_SRC_DEST/"
+          rsync -a --delete src/llvm-project/libunwind "$RUST_SRC_DEST/src/llvm-project/"
+          test -d "$RUST_SRC_DEST/library"
+          test -d "$RUST_SRC_DEST/src/llvm-project/libunwind"
+          du -sh "$RUST_SRC_DEST" | tee "$DIAGNOSTICS_DIR/rust-src-size.txt"
+
+          PREBUILT_STD_TARGETS=(
+            "$HOST_TRIPLE"
+            arm64e-apple-darwin
+            arm64e-apple-ios
+            arm64e-apple-tvos
+            arm64e-apple-visionos
+          )
+
+          "./dist/stage1-arm64e-patch/bin/rustc" --print target-list | tee "$DIAGNOSTICS_DIR/target-list.txt"
+          for target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
+            grep -qx "$target" "$DIAGNOSTICS_DIR/target-list.txt"
+          done
+          for target in "${PREBUILT_STD_TARGETS[@]}"; do
+            LIBDIR="$(./dist/stage1-arm64e-patch/bin/rustc --print target-libdir --target "$target")"
+            test -n "$(find "$LIBDIR" -maxdepth 1 -name 'libstd-*.rlib' -print -quit)"
+          done
+          HOST_LIBDIR="$(./dist/stage1-arm64e-patch/bin/rustc --print target-libdir --target "$HOST_TRIPLE")"
+          test -n "$(find "$HOST_LIBDIR" -maxdepth 1 -name 'libproc_macro-*.rlib' -print -quit)"
+          test -d "$(./dist/stage1-arm64e-patch/bin/rustc --print sysroot)/lib/rustlib/src/rust/library"
+
+          cat > "$DIAGNOSTICS_DIR/hello.rs" <<'EOF'
+          fn main() {
+              println!("hello-stage1-arm64e");
+          }
+          EOF
+
+          "./dist/stage1-arm64e-patch/bin/rustc" \
+            "$DIAGNOSTICS_DIR/hello.rs" \
+            --target "$HOST_TRIPLE" \
+            -O \
+            -o "$DIAGNOSTICS_DIR/hello-host"
+          /usr/bin/file "$DIAGNOSTICS_DIR/hello-host" | tee "$DIAGNOSTICS_DIR/hello-host-file.txt"
+          "$DIAGNOSTICS_DIR/hello-host" | tee "$DIAGNOSTICS_DIR/hello-host-run.txt"
+
+          "./dist/stage1-arm64e-patch/bin/rustc" \
+            "$DIAGNOSTICS_DIR/hello.rs" \
+            --target arm64e-apple-darwin \
+            -O \
+            -o "$DIAGNOSTICS_DIR/hello-arm64e"
+          /usr/bin/file "$DIAGNOSTICS_DIR/hello-arm64e" | tee "$DIAGNOSTICS_DIR/hello-arm64e-file.txt"
+          if [ "$HOST_TRIPLE" = "aarch64-apple-darwin" ]; then
+            "$DIAGNOSTICS_DIR/hello-arm64e" | tee "$DIAGNOSTICS_DIR/hello-arm64e-run.txt"
+          else
+            echo "Skipping arm64e binary execution on ${HOST_TRIPLE}" | tee "$DIAGNOSTICS_DIR/hello-arm64e-run.txt"
+          fi
+
+          SMOKE_ROOT="$DIAGNOSTICS_DIR/generic-array-smoke"
+          STAGE1_RUSTC="$PWD/dist/stage1-arm64e-patch/bin/rustc"
+          rm -rf "$SMOKE_ROOT"
+          mkdir -p "$SMOKE_ROOT/src"
+          cat > "$SMOKE_ROOT/Cargo.toml" <<'EOF'
+          [package]
+          name = "generic-array-arm64e-smoke"
+          version = "0.0.0"
+          edition = "2021"
+
+          [dependencies]
+          generic-array = "=1.4.1"
+          rustversion = "=1.0.22"
+          EOF
+          cat > "$SMOKE_ROOT/src/main.rs" <<'EOF'
+          use generic_array::{typenum::U16, GenericArray};
+
+          fn main() {
+              let mut bytes = GenericArray::<u8, U16>::default();
+              bytes[0] = 42;
+              println!("{}", bytes[0]);
+          }
+          EOF
+          rustup toolchain install stable --profile minimal
+          cargo +stable generate-lockfile --manifest-path "$SMOKE_ROOT/Cargo.toml"
+          for smoke_target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
+            echo "=== generic-array smoke: ${smoke_target} ==="
+            env \
+              CARGO_TARGET_DIR="$SMOKE_ROOT/target-${smoke_target}" \
+              RUSTC="$STAGE1_RUSTC" \
+              cargo +stable build --locked \
+                --target "$smoke_target" \
+                --manifest-path "$SMOKE_ROOT/Cargo.toml" \
+              2>&1 | tee "$DIAGNOSTICS_DIR/generic-array-smoke-${smoke_target}.log"
+          done
+
+          bsdtar -cf - -C dist stage1-arm64e-patch | zstd -T0 -19 -o "${ASSET_BASE}.tar.zst"
+          shasum -a 256 "${ASSET_BASE}.tar.zst" > "${ASSET_BASE}.sha256"
+
+          STAGE1_RUSTC_VERBOSE="$(./dist/stage1-arm64e-patch/bin/rustc -vV)"
+          XCODE_VERSION="$(xcodebuild -version | tr '\n' ' ' | sed 's/  */ /g; s/ $//')"
+          BUILT_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          TOOLCHAIN_SIZE_BYTES="$(stat -f%z "${ASSET_BASE}.tar.zst")"
+          UPSTREAM_MAIN_SHA="$(git rev-parse refs/remotes/origin/main)"
+          export STAGE1_RUSTC_VERBOSE
+
+          python3 - <<PY
+          import json
+          import os
+          from pathlib import Path
+
+          payload = {
+              "schemaVersion": 2,
+              "releaseTag": "${RELEASE_TAG}",
+              "releaseURL": "${RELEASE_URL}",
+              "sourceRepository": "${GITHUB_REPOSITORY}",
+              "sourceRef": "${SOURCE_REF}",
+              "sourceCommit": "${CHECKED_OUT_COMMIT}",
+              "checkedOutCommit": "$(git rev-parse HEAD)",
+              "forkMainCommit": "${UPSTREAM_MAIN_SHA}",
+              "stableBaseRelease": "${STABLE_BASE_RELEASE}",
+              "stableBaseCommit": "${STABLE_BASE_COMMIT}",
+              "requiresBuildStd": False,
+              "hostTriple": "${HOST_TRIPLE}",
+              "includedHostStdTarget": "${HOST_TRIPLE}",
+              "includedRustSrc": True,
+              "targetTriple": "arm64e-apple-darwin",
+              "builtAt": "${BUILT_AT}",
+              "workflowURL": "${WORKFLOW_URL}",
+              "xcodeVersion": "${XCODE_VERSION}",
+              "stage1RustcVersionVerbose": os.environ["STAGE1_RUSTC_VERBOSE"],
+              "asset": {
+                  "purpose": "rust-stage1-for-arm64e",
+                  "fileName": "${ASSET_BASE}.tar.zst",
+                  "sha256FileName": "${ASSET_BASE}.sha256",
+                  "sizeBytes": int("${TOOLCHAIN_SIZE_BYTES}"),
+              },
+              "includedPrebuiltStdTargets": [
+                  "${HOST_TRIPLE}",
+                  "arm64e-apple-darwin",
+                  "arm64e-apple-ios",
+                  "arm64e-apple-tvos",
+                  "arm64e-apple-visionos",
+              ],
+              "includedAppleArm64eTargets": [
+                  "arm64e-apple-darwin",
+                  "arm64e-apple-ios",
+                  "arm64e-apple-tvos",
+                  "arm64e-apple-visionos",
+              ],
+          }
+          Path("${ASSET_BASE}.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+          PY
+
+          bsdtar -cf - -C /tmp "arm64e-stage1-diagnostics-${HOST_TRIPLE}" | zstd -T0 -10 -o "$DIAGNOSTICS_ASSET"
+
+      - name: Generate artifact attestation
+        if: env.CREATE_RELEASE == 'true'
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            ${{ env.ASSET_BASE }}.tar.zst
+            ${{ env.ASSET_BASE }}.sha256
+            ${{ env.ASSET_BASE }}.json
+            ${{ env.DIAGNOSTICS_ASSET }}
+
+      - name: Upload stage1 artifact bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64e-stage1-${{ matrix.expected_host_triple }}
+          path: |
+            ${{ env.ASSET_BASE }}.tar.zst
+            ${{ env.ASSET_BASE }}.sha256
+            ${{ env.ASSET_BASE }}.json
+            ${{ env.DIAGNOSTICS_ASSET }}
+          retention-days: 7
+          if-no-files-found: error
+
+  publish-stage1:
+    if: github.repository == 'cypherair/rust' && needs.resolve-release.outputs.create_release == 'true'
+    needs:
+      - resolve-release
+      - build-stage1
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      SOURCE_REF: ${{ needs.resolve-release.outputs.source_ref }}
+      RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
+      RELEASE_TITLE: ${{ needs.resolve-release.outputs.release_title }}
+      WORKFLOW_URL: ${{ needs.resolve-release.outputs.workflow_url }}
+      CHECKED_OUT_COMMIT: ${{ needs.resolve-release.outputs.checked_out_commit }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          ref: ${{ needs.resolve-release.outputs.source_ref }}
+
+      - name: Download host-specific stage1 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: arm64e-stage1-*
+          path: stage1-artifacts
+          merge-multiple: true
+
+      - name: Verify host artifacts and generate release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          cd stage1-artifacts
+          HOST_TRIPLES=(aarch64-apple-darwin x86_64-apple-darwin)
+
+          {
+            echo "Prerelease Rust stage1 toolchains for CypherAir Apple arm64e validation."
+            echo
+            echo "- Source ref: \`${SOURCE_REF}\`"
+            echo "- Commit: \`${CHECKED_OUT_COMMIT}\`"
+            echo "- Stable base: \`${STABLE_BASE_RELEASE}\` / \`${STABLE_BASE_COMMIT}\`"
+            echo "- Requires \`-Zbuild-std\`: \`false\`"
+            echo "- Workflow: [${WORKFLOW_URL}](${WORKFLOW_URL})"
+            echo
+            echo "Assets:"
+            echo
+          } > ../release-notes.md
+
+          for host_triple in "${HOST_TRIPLES[@]}"; do
+            asset="${STAGE1_ASSET_PREFIX}-${host_triple}.tar.zst"
+            sha="${STAGE1_ASSET_PREFIX}-${host_triple}.sha256"
+            manifest="${STAGE1_ASSET_PREFIX}-${host_triple}.json"
+            diagnostics="arm64e-stage1-diagnostics-${host_triple}.tar.zst"
+
+            test -f "$asset"
+            test -f "$sha"
+            test -f "$manifest"
+            test -f "$diagnostics"
+            shasum -a 256 -c "$sha"
+
+            manifest_host="$(jq -r '.hostTriple' "$manifest")"
+            manifest_purpose="$(jq -r '.asset.purpose' "$manifest")"
+            if [ "$manifest_host" != "$host_triple" ]; then
+              echo "::error::${manifest} hostTriple must be ${host_triple}, got ${manifest_host}"
+              exit 1
+            fi
+            if [ "$manifest_purpose" != "rust-stage1-for-arm64e" ]; then
+              echo "::error::${manifest} asset purpose must be rust-stage1-for-arm64e, got ${manifest_purpose}"
+              exit 1
+            fi
+            for target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
+              jq -e --arg target "$target" '.includedAppleArm64eTargets | index($target)' "$manifest" >/dev/null
+              jq -e --arg target "$target" '.includedPrebuiltStdTargets | index($target)' "$manifest" >/dev/null
+            done
+            for attested in "$asset" "$sha" "$manifest" "$diagnostics"; do
+              gh attestation verify "$attested" \
+                -R "$GITHUB_REPOSITORY" \
+                --source-ref "$SOURCE_REF" \
+                --source-digest "$CHECKED_OUT_COMMIT"
+            done
+
+            {
+              echo "- \`${asset}\`"
+              echo "- \`${sha}\`"
+              echo "- \`${manifest}\`"
+              echo "- \`${diagnostics}\`"
+            } >> ../release-notes.md
+          done
+
+          {
+            echo
+            echo "Verification:"
+            echo
+            echo '```bash'
+            for host_triple in "${HOST_TRIPLES[@]}"; do
+              asset="${STAGE1_ASSET_PREFIX}-${host_triple}.tar.zst"
+              sha="${STAGE1_ASSET_PREFIX}-${host_triple}.sha256"
+              echo "shasum -a 256 -c ${sha}"
+              echo "gh release verify-asset \"$RELEASE_TAG\" ${asset} -R \"$GITHUB_REPOSITORY\""
+              echo "gh attestation verify ${asset} -R \"$GITHUB_REPOSITORY\" --source-ref \"$SOURCE_REF\" --source-digest \"$CHECKED_OUT_COMMIT\""
+            done
+            echo '```'
+          } >> ../release-notes.md
+
+      - name: Create release tag
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::Release tag already exists: $RELEASE_TAG"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$RELEASE_TAG" "$CHECKED_OUT_COMMIT"
+          git push origin "refs/tags/$RELEASE_TAG"
+
+      - name: Create draft prerelease
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            --verify-tag \
+            --target "$CHECKED_OUT_COMMIT" \
+            --title "$RELEASE_TITLE" \
+            --notes-file release-notes.md \
+            --prerelease \
+            --latest=false \
+            --draft
+
+      - name: Upload prerelease assets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd stage1-artifacts
+          gh release upload "$RELEASE_TAG" \
+            rust-stage1-for-arm64e-aarch64-apple-darwin.tar.zst \
+            rust-stage1-for-arm64e-aarch64-apple-darwin.sha256 \
+            rust-stage1-for-arm64e-aarch64-apple-darwin.json \
+            arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst \
+            rust-stage1-for-arm64e-x86_64-apple-darwin.tar.zst \
+            rust-stage1-for-arm64e-x86_64-apple-darwin.sha256 \
+            rust-stage1-for-arm64e-x86_64-apple-darwin.json \
+            arm64e-stage1-diagnostics-x86_64-apple-darwin.tar.zst
+
+      - name: Verify uploaded asset list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd stage1-artifacts
+
+          expected_assets=(
+            rust-stage1-for-arm64e-aarch64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-aarch64-apple-darwin.sha256
+            rust-stage1-for-arm64e-aarch64-apple-darwin.json
+            arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-x86_64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-x86_64-apple-darwin.sha256
+            rust-stage1-for-arm64e-x86_64-apple-darwin.json
+            arm64e-stage1-diagnostics-x86_64-apple-darwin.tar.zst
+          )
+          gh release view "$RELEASE_TAG" \
+            -R "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets[].name' > uploaded-assets.txt
+          for expected_asset in "${expected_assets[@]}"; do
+            grep -Fx "$expected_asset" uploaded-assets.txt >/dev/null
+          done
+
+      - name: Publish draft prerelease
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+
+      - name: Verify published release asset attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd stage1-artifacts
+
+          release_assets=(
+            rust-stage1-for-arm64e-aarch64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-aarch64-apple-darwin.sha256
+            rust-stage1-for-arm64e-aarch64-apple-darwin.json
+            arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-x86_64-apple-darwin.tar.zst
+            rust-stage1-for-arm64e-x86_64-apple-darwin.sha256
+            rust-stage1-for-arm64e-x86_64-apple-darwin.json
+            arm64e-stage1-diagnostics-x86_64-apple-darwin.tar.zst
+          )
+
+          for attempt in {1..12}; do
+            all_verified=1
+            for release_asset in "${release_assets[@]}"; do
+              if ! gh release verify-asset "$RELEASE_TAG" "$release_asset" -R "$GITHUB_REPOSITORY"; then
+                all_verified=0
+                break
+              fi
+            done
+            if [ "$all_verified" -eq 1 ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "::error::Published release asset attestations were not available for ${RELEASE_TAG}."
+          exit 1
+
+      - name: Cleanup failed draft release/tag
+        if: ${{ failure() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          if [ -z "${RELEASE_TAG:-}" ]; then
+            exit 0
+          fi
+          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --cleanup-tag --yes
+            exit 0
+          fi
+          git push origin ":refs/tags/$RELEASE_TAG" 2>/dev/null || true
