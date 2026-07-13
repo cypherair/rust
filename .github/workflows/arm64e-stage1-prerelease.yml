@@ -448,6 +448,8 @@ jobs:
         shell: bash
     env:
       SOURCE_REF: ${{ needs.resolve-release.outputs.source_ref }}
+      # GitHub provenance records the workflow ref in canonical refs/... form.
+      ATTESTATION_SOURCE_REF: ${{ github.ref }}
       RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
       RELEASE_TITLE: ${{ needs.resolve-release.outputs.release_title }}
       WORKFLOW_URL: ${{ needs.resolve-release.outputs.workflow_url }}
@@ -479,6 +481,7 @@ jobs:
             echo "Prerelease Rust stage1 toolchains for CypherAir Apple arm64e validation."
             echo
             echo "- Source ref: \`${SOURCE_REF}\`"
+            echo "- Attestation source ref: \`${ATTESTATION_SOURCE_REF}\`"
             echo "- Commit: \`${CHECKED_OUT_COMMIT}\`"
             echo "- Stable base: \`${STABLE_BASE_RELEASE}\` / \`${STABLE_BASE_COMMIT}\`"
             echo "- Requires \`-Zbuild-std\`: \`false\`"
@@ -517,7 +520,7 @@ jobs:
             for attested in "$asset" "$sha" "$manifest" "$diagnostics"; do
               gh attestation verify "$attested" \
                 -R "$GITHUB_REPOSITORY" \
-                --source-ref "$SOURCE_REF" \
+                --source-ref "$ATTESTATION_SOURCE_REF" \
                 --source-digest "$CHECKED_OUT_COMMIT"
             done
 
@@ -539,7 +542,7 @@ jobs:
               sha="${STAGE1_ASSET_PREFIX}-${host_triple}.sha256"
               echo "shasum -a 256 -c ${sha}"
               echo "gh release verify-asset \"$RELEASE_TAG\" ${asset} -R \"$GITHUB_REPOSITORY\""
-              echo "gh attestation verify ${asset} -R \"$GITHUB_REPOSITORY\" --source-ref \"$SOURCE_REF\" --source-digest \"$CHECKED_OUT_COMMIT\""
+              echo "gh attestation verify ${asset} -R \"$GITHUB_REPOSITORY\" --source-ref \"$ATTESTATION_SOURCE_REF\" --source-digest \"$CHECKED_OUT_COMMIT\""
             done
             echo '```'
           } >> ../release-notes.md
