@@ -235,8 +235,10 @@ jobs:
       - name: Run targeted arm64e validation
         run: |
           set -euo pipefail
-          python3 x.py check compiler/rustc_codegen_ssa compiler/rustc_codegen_llvm --stage 1
-          python3 x.py test --stage 1 --force-rerun \
+          python3 x.py --set llvm.download-ci-llvm=false \
+            check compiler/rustc_codegen_ssa compiler/rustc_codegen_llvm --stage 1
+          python3 x.py --set llvm.download-ci-llvm=false \
+            test --stage 1 --force-rerun \
             tests/codegen-llvm/arm64e-apple-ptrauth*.rs \
             tests/assembly-llvm/arm64e-apple-ptrauth-calls.rs \
             tests/assembly-llvm/targets/targets-macho.rs \
@@ -247,7 +249,9 @@ jobs:
         run: |
           set -euo pipefail
           ARM64E_TARGETS="arm64e-apple-darwin,arm64e-apple-ios,arm64e-apple-tvos,arm64e-apple-visionos"
-          python3 x.py build compiler/rustc library/std library/proc_macro --stage 1 --target "${HOST_TRIPLE},${ARM64E_TARGETS}"
+          python3 x.py --set llvm.download-ci-llvm=false \
+            build compiler/rustc library/std library/proc_macro --stage 1 \
+            --target "${HOST_TRIPLE},${ARM64E_TARGETS}"
 
       - name: Package minimal stage1 toolchain
         run: |
@@ -257,6 +261,39 @@ jobs:
           DIAGNOSTICS_DIR="/tmp/arm64e-stage1-diagnostics-${HOST_TRIPLE}"
           if [ ! -x "$STAGE1/bin/rustc" ]; then
             echo "::error::stage1 rustc missing at $STAGE1/bin/rustc"
+            exit 1
+          fi
+          LLVM_GITLINK_COMMIT="$(git rev-parse HEAD:src/llvm-project)"
+          LLVM_CHECKED_OUT_COMMIT="$(git -C src/llvm-project rev-parse HEAD)"
+          if [ "$LLVM_CHECKED_OUT_COMMIT" != "$LLVM_GITLINK_COMMIT" ]; then
+            echo "::error::LLVM checkout ${LLVM_CHECKED_OUT_COMMIT} does not match gitlink ${LLVM_GITLINK_COMMIT}."
+            exit 1
+          fi
+          if [ -n "$(git -C src/llvm-project status --porcelain)" ]; then
+            echo "::error::LLVM checkout must be clean before packaging."
+            exit 1
+          fi
+
+          LLVM_VERSION_FILE="src/llvm-project/cmake/Modules/LLVMVersion.cmake"
+          llvm_version_component() {
+            local component="$1"
+            local value
+            value="$(sed -nE "s/^[[:space:]]*set\\(LLVM_VERSION_${component}[[:space:]]+([0-9]+)\\)[[:space:]]*$/\\1/p" "$LLVM_VERSION_FILE")"
+            if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+              echo "::error::Could not derive unique LLVM ${component} version from ${LLVM_VERSION_FILE}." >&2
+              exit 1
+            fi
+            printf '%s' "$value"
+          }
+          LLVM_SOURCE_VERSION="$(llvm_version_component MAJOR).$(llvm_version_component MINOR).$(llvm_version_component PATCH)"
+
+          LLVM_CONFIG="build/${HOST_TRIPLE}/llvm/bin/llvm-config"
+          if [ ! -x "$LLVM_CONFIG" ]; then
+            echo "::error::Bundled LLVM llvm-config missing at ${LLVM_CONFIG}."
+            exit 1
+          fi
+          if [ -e "build/${HOST_TRIPLE}/ci-llvm" ]; then
+            echo "::error::CI LLVM directory exists despite llvm.download-ci-llvm=false."
             exit 1
           fi
 
@@ -292,6 +329,11 @@ jobs:
           HOST_LIBDIR="$(./dist/stage1-arm64e-patch/bin/rustc --print target-libdir --target "$HOST_TRIPLE")"
           test -n "$(find "$HOST_LIBDIR" -maxdepth 1 -name 'libproc_macro-*.rlib' -print -quit)"
           test -d "$(./dist/stage1-arm64e-patch/bin/rustc --print sysroot)/lib/rustlib/src/rust/library"
+          PACKAGED_LLC="$(dirname "$HOST_LIBDIR")/bin/llc"
+          if [ ! -x "$PACKAGED_LLC" ]; then
+            echo "::error::Packaged llc missing at ${PACKAGED_LLC}."
+            exit 1
+          fi
 
           cat > "$DIAGNOSTICS_DIR/hello.rs" <<'EOF'
           fn main() {
@@ -355,15 +397,79 @@ jobs:
               2>&1 | tee "$DIAGNOSTICS_DIR/generic-array-smoke-${smoke_target}.log"
           done
 
+          STAGE1_RUSTC_VERBOSE="$(./dist/stage1-arm64e-patch/bin/rustc -vV)"
+          PACKAGED_LLC_VERBOSE="$($PACKAGED_LLC --version)"
+          LLVM_CONFIG_VERSION_RAW="$($LLVM_CONFIG --version)"
+          RUSTC_HOST="$(printf '%s\n' "$STAGE1_RUSTC_VERBOSE" | sed -n 's/^host: //p')"
+          RUSTC_LLVM_VERSION="$(printf '%s\n' "$STAGE1_RUSTC_VERBOSE" | sed -n 's/^LLVM version: //p')"
+          LLC_LLVM_VERSION="$(printf '%s\n' "$PACKAGED_LLC_VERBOSE" | sed -nE 's/^.*LLVM version ([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p')"
+          LLVM_CONFIG_VERSION="$(printf '%s\n' "$LLVM_CONFIG_VERSION_RAW" | sed -nE 's/^([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p')"
+
+          if [ "$RUSTC_HOST" != "$HOST_TRIPLE" ]; then
+            echo "::error::Packaged rustc host identity does not match ${HOST_TRIPLE}."
+            exit 1
+          fi
+          for reported_version in \
+            "$RUSTC_LLVM_VERSION" \
+            "$LLC_LLVM_VERSION" \
+            "$LLVM_CONFIG_VERSION"; do
+            if [ "$reported_version" != "$LLVM_SOURCE_VERSION" ]; then
+              echo "::error::Built LLVM identity ${reported_version:-<missing>} does not match source version ${LLVM_SOURCE_VERSION}."
+              exit 1
+            fi
+          done
+
+          printf '%s\n' "$STAGE1_RUSTC_VERBOSE" | tee "$DIAGNOSTICS_DIR/stage1-rustc-vv.txt"
+          printf '%s\n' "$PACKAGED_LLC_VERBOSE" | tee "$DIAGNOSTICS_DIR/packaged-llc-version.txt"
+          printf '%s\n' "$LLVM_CONFIG_VERSION_RAW" | tee "$DIAGNOSTICS_DIR/bundled-llvm-config-version.txt"
+
+          LLVM_IDENTITY_RELATIVE_PATH="lib/rustlib/arm64e-stage1-llvm-provenance.json"
+          LLVM_IDENTITY_PATH="dist/stage1-arm64e-patch/${LLVM_IDENTITY_RELATIVE_PATH}"
+          export HOST_TRIPLE LLVM_GITLINK_COMMIT LLVM_CHECKED_OUT_COMMIT LLVM_SOURCE_VERSION
+          export LLVM_CONFIG_VERSION_RAW RUSTC_LLVM_VERSION LLC_LLVM_VERSION
+          export STAGE1_RUSTC_VERBOSE PACKAGED_LLC_VERBOSE
+          export LLVM_IDENTITY_PATH
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          identity = {
+              "schemaVersion": 1,
+              "sourceKind": "bundled-gitlink",
+              "downloadCiLlvm": False,
+              "gitlinkCommit": os.environ["LLVM_GITLINK_COMMIT"],
+              "checkedOutCommit": os.environ["LLVM_CHECKED_OUT_COMMIT"],
+              "sourceVersion": os.environ["LLVM_SOURCE_VERSION"],
+              "llvmConfigVersion": os.environ["LLVM_CONFIG_VERSION_RAW"],
+              "hostTriple": os.environ["HOST_TRIPLE"],
+              "tools": {
+                  "rustc": {
+                      "llvmVersion": os.environ["RUSTC_LLVM_VERSION"],
+                      "versionVerbose": os.environ["STAGE1_RUSTC_VERBOSE"],
+                  },
+                  "llc": {
+                      "llvmVersion": os.environ["LLC_LLVM_VERSION"],
+                      "versionVerbose": os.environ["PACKAGED_LLC_VERBOSE"],
+                  },
+              },
+          }
+          identity_path = Path(os.environ["LLVM_IDENTITY_PATH"])
+          identity_path.parent.mkdir(parents=True, exist_ok=True)
+          identity_path.write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n")
+          PY
+
           bsdtar -cf - -C dist stage1-arm64e-patch | zstd -T0 -19 -o "${ASSET_BASE}.tar.zst"
           shasum -a 256 "${ASSET_BASE}.tar.zst" > "${ASSET_BASE}.sha256"
+          bsdtar -xOf "${ASSET_BASE}.tar.zst" \
+            "stage1-arm64e-patch/${LLVM_IDENTITY_RELATIVE_PATH}" | cmp - "$LLVM_IDENTITY_PATH"
 
-          STAGE1_RUSTC_VERBOSE="$(./dist/stage1-arm64e-patch/bin/rustc -vV)"
           XCODE_VERSION="$(xcodebuild -version | tr '\n' ' ' | sed 's/  */ /g; s/ $//')"
           BUILT_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           TOOLCHAIN_SIZE_BYTES="$(stat -f%z "${ASSET_BASE}.tar.zst")"
           UPSTREAM_MAIN_SHA="$(git rev-parse refs/remotes/origin/main)"
-          export STAGE1_RUSTC_VERBOSE
+          export STAGE1_RUSTC_VERBOSE PACKAGED_LLC_VERBOSE
+          export LLVM_IDENTITY_RELATIVE_PATH
 
           python3 - <<PY
           import json
@@ -371,7 +477,7 @@ jobs:
           from pathlib import Path
 
           payload = {
-              "schemaVersion": 2,
+              "schemaVersion": 3,
               "releaseTag": "${RELEASE_TAG}",
               "releaseURL": "${RELEASE_URL}",
               "sourceRepository": "${GITHUB_REPOSITORY}",
@@ -390,6 +496,18 @@ jobs:
               "workflowURL": "${WORKFLOW_URL}",
               "xcodeVersion": "${XCODE_VERSION}",
               "stage1RustcVersionVerbose": os.environ["STAGE1_RUSTC_VERBOSE"],
+              "packagedLlcVersionVerbose": os.environ["PACKAGED_LLC_VERBOSE"],
+              "llvmProvenance": {
+                  "sourceKind": "bundled-gitlink",
+                  "downloadCiLlvm": False,
+                  "gitlinkCommit": os.environ["LLVM_GITLINK_COMMIT"],
+                  "checkedOutCommit": os.environ["LLVM_CHECKED_OUT_COMMIT"],
+                  "sourceVersion": os.environ["LLVM_SOURCE_VERSION"],
+                  "llvmConfigVersion": os.environ["LLVM_CONFIG_VERSION_RAW"],
+                  "rustcReportedVersion": os.environ["RUSTC_LLVM_VERSION"],
+                  "llcReportedVersion": os.environ["LLC_LLVM_VERSION"],
+                  "packagedIdentityFile": os.environ["LLVM_IDENTITY_RELATIVE_PATH"],
+              },
               "asset": {
                   "purpose": "rust-stage1-for-arm64e",
                   "fileName": "${ASSET_BASE}.tar.zst",
@@ -474,6 +592,30 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ "$(git rev-parse HEAD)" != "$CHECKED_OUT_COMMIT" ]; then
+            echo "::error::Publisher checkout does not match ${CHECKED_OUT_COMMIT}."
+            exit 1
+          fi
+          git submodule update --init --depth=1 src/llvm-project
+          EXPECTED_LLVM_GITLINK_COMMIT="$(git rev-parse HEAD:src/llvm-project)"
+          EXPECTED_LLVM_CHECKED_OUT_COMMIT="$(git -C src/llvm-project rev-parse HEAD)"
+          if [ "$EXPECTED_LLVM_CHECKED_OUT_COMMIT" != "$EXPECTED_LLVM_GITLINK_COMMIT" ]; then
+            echo "::error::Publisher LLVM checkout does not match the Rust gitlink."
+            exit 1
+          fi
+          LLVM_VERSION_FILE="src/llvm-project/cmake/Modules/LLVMVersion.cmake"
+          llvm_version_component() {
+            local component="$1"
+            local value
+            value="$(sed -nE "s/^[[:space:]]*set\\(LLVM_VERSION_${component}[[:space:]]+([0-9]+)\\)[[:space:]]*$/\\1/p" "$LLVM_VERSION_FILE")"
+            if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+              echo "::error::Could not derive unique LLVM ${component} version from ${LLVM_VERSION_FILE}." >&2
+              exit 1
+            fi
+            printf '%s' "$value"
+          }
+          EXPECTED_LLVM_VERSION="$(llvm_version_component MAJOR).$(llvm_version_component MINOR).$(llvm_version_component PATCH)"
+
           cd stage1-artifacts
           HOST_TRIPLES=(aarch64-apple-darwin x86_64-apple-darwin)
 
@@ -484,6 +626,7 @@ jobs:
             echo "- Attestation source ref: \`${ATTESTATION_SOURCE_REF}\`"
             echo "- Commit: \`${CHECKED_OUT_COMMIT}\`"
             echo "- Stable base: \`${STABLE_BASE_RELEASE}\` / \`${STABLE_BASE_COMMIT}\`"
+            echo "- LLVM: bundled gitlink \`${EXPECTED_LLVM_GITLINK_COMMIT}\` / \`${EXPECTED_LLVM_VERSION}\`"
             echo "- Requires \`-Zbuild-std\`: \`false\`"
             echo "- Workflow: [${WORKFLOW_URL}](${WORKFLOW_URL})"
             echo
@@ -503,8 +646,36 @@ jobs:
             test -f "$diagnostics"
             shasum -a 256 -c "$sha"
 
+            manifest_schema="$(jq -er '.schemaVersion' "$manifest")"
+            manifest_source_commit="$(jq -er '.sourceCommit' "$manifest")"
+            manifest_checked_out_commit="$(jq -er '.checkedOutCommit' "$manifest")"
             manifest_host="$(jq -r '.hostTriple' "$manifest")"
             manifest_purpose="$(jq -r '.asset.purpose' "$manifest")"
+            manifest_llvm_source_kind="$(jq -er '.llvmProvenance.sourceKind' "$manifest")"
+            manifest_download_ci_llvm="$(jq -er '.llvmProvenance.downloadCiLlvm | tostring' "$manifest")"
+            manifest_llvm_gitlink="$(jq -er '.llvmProvenance.gitlinkCommit' "$manifest")"
+            manifest_llvm_checkout="$(jq -er '.llvmProvenance.checkedOutCommit' "$manifest")"
+            manifest_llvm_source_version="$(jq -er '.llvmProvenance.sourceVersion' "$manifest")"
+            manifest_llvm_config_version="$(jq -er '.llvmProvenance.llvmConfigVersion' "$manifest")"
+            manifest_llvm_config_numeric="$(printf '%s\n' "$manifest_llvm_config_version" | sed -nE 's/^([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p')"
+            manifest_rustc_llvm_version="$(jq -er '.llvmProvenance.rustcReportedVersion' "$manifest")"
+            manifest_llc_llvm_version="$(jq -er '.llvmProvenance.llcReportedVersion' "$manifest")"
+            manifest_identity_file="$(jq -er '.llvmProvenance.packagedIdentityFile' "$manifest")"
+            rustc_verbose="$(jq -er '.stage1RustcVersionVerbose' "$manifest")"
+            llc_verbose="$(jq -er '.packagedLlcVersionVerbose' "$manifest")"
+            rustc_host="$(printf '%s\n' "$rustc_verbose" | sed -n 's/^host: //p')"
+            rustc_verbose_llvm="$(printf '%s\n' "$rustc_verbose" | sed -n 's/^LLVM version: //p')"
+            llc_verbose_llvm="$(printf '%s\n' "$llc_verbose" | sed -nE 's/^.*LLVM version ([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p')"
+
+            if [ "$manifest_schema" != "3" ]; then
+              echo "::error::${manifest} schemaVersion must be 3, got ${manifest_schema}"
+              exit 1
+            fi
+            if [ "$manifest_source_commit" != "$CHECKED_OUT_COMMIT" ] || \
+               [ "$manifest_checked_out_commit" != "$CHECKED_OUT_COMMIT" ]; then
+              echo "::error::${manifest} source commits must both be ${CHECKED_OUT_COMMIT}"
+              exit 1
+            fi
             if [ "$manifest_host" != "$host_triple" ]; then
               echo "::error::${manifest} hostTriple must be ${host_triple}, got ${manifest_host}"
               exit 1
@@ -513,6 +684,58 @@ jobs:
               echo "::error::${manifest} asset purpose must be rust-stage1-for-arm64e, got ${manifest_purpose}"
               exit 1
             fi
+            if [ "$rustc_host" != "$host_triple" ]; then
+              echo "::error::${manifest} packaged rustc host identity does not match ${host_triple}"
+              exit 1
+            fi
+            if [ "$manifest_llvm_source_kind" != "bundled-gitlink" ] || [ "$manifest_download_ci_llvm" != "false" ]; then
+              echo "::error::${manifest} must identify a bundled, non-CI LLVM build"
+              exit 1
+            fi
+            if [ "$manifest_llvm_gitlink" != "$EXPECTED_LLVM_GITLINK_COMMIT" ] || \
+               [ "$manifest_llvm_checkout" != "$EXPECTED_LLVM_GITLINK_COMMIT" ]; then
+              echo "::error::${manifest} LLVM commit does not match expected gitlink ${EXPECTED_LLVM_GITLINK_COMMIT}"
+              exit 1
+            fi
+            for manifest_version in \
+              "$manifest_llvm_source_version" \
+              "$manifest_llvm_config_numeric" \
+              "$manifest_rustc_llvm_version" \
+              "$manifest_llc_llvm_version" \
+              "$rustc_verbose_llvm" \
+              "$llc_verbose_llvm"; do
+              if [ "$manifest_version" != "$EXPECTED_LLVM_VERSION" ]; then
+                echo "::error::${manifest} LLVM version ${manifest_version:-<missing>} does not match ${EXPECTED_LLVM_VERSION}"
+                exit 1
+              fi
+            done
+            if [ "$manifest_identity_file" != "lib/rustlib/arm64e-stage1-llvm-provenance.json" ]; then
+              echo "::error::${manifest} has unexpected packaged LLVM identity path ${manifest_identity_file}"
+              exit 1
+            fi
+            identity="${manifest%.json}-llvm-provenance.json"
+            tar --zstd -xOf "$asset" \
+              "stage1-arm64e-patch/${manifest_identity_file}" > "$identity"
+            jq -e \
+              --arg host "$host_triple" \
+              --arg commit "$EXPECTED_LLVM_GITLINK_COMMIT" \
+              --arg version "$EXPECTED_LLVM_VERSION" \
+              --arg llvm_config "$manifest_llvm_config_version" \
+              --arg rustc_verbose "$rustc_verbose" \
+              --arg llc_verbose "$llc_verbose" \
+              '.schemaVersion == 1
+               and .sourceKind == "bundled-gitlink"
+               and .downloadCiLlvm == false
+               and .gitlinkCommit == $commit
+               and .checkedOutCommit == $commit
+               and .sourceVersion == $version
+               and .llvmConfigVersion == $llvm_config
+               and .hostTriple == $host
+               and .tools.rustc.llvmVersion == $version
+               and .tools.rustc.versionVerbose == $rustc_verbose
+               and .tools.llc.llvmVersion == $version
+               and .tools.llc.versionVerbose == $llc_verbose' \
+              "$identity" >/dev/null
             for target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
               jq -e --arg target "$target" '.includedAppleArm64eTargets | index($target)' "$manifest" >/dev/null
               jq -e --arg target "$target" '.includedPrebuiltStdTargets | index($target)' "$manifest" >/dev/null
