@@ -150,7 +150,7 @@ jobs:
             expected_host_triple: x86_64-apple-darwin
     name: build-stage1 (${{ matrix.expected_host_triple }})
     runs-on: ${{ matrix.runner_label }}
-    timeout-minutes: 240
+    timeout-minutes: 360
     defaults:
       run:
         shell: bash
