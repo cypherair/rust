@@ -6,7 +6,7 @@ on:
       source_ref:
         description: Branch, tag, or SHA to build.
         required: true
-        default: carry/cypherair-arm64e-toolchain-stable-1.97
+        default: refs/heads/carry/cypherair-arm64e-toolchain-stable-1.97
         type: string
       release_tag_prefix:
         description: Unique release tag prefix.
@@ -68,7 +68,7 @@ jobs:
 
           case "$GITHUB_EVENT_NAME" in
             workflow_dispatch)
-              SOURCE_REF="${INPUT_SOURCE_REF:-$INTEGRATION_BRANCH}"
+              SOURCE_REF="${INPUT_SOURCE_REF:-refs/heads/$INTEGRATION_BRANCH}"
               RELEASE_TAG_PREFIX="${INPUT_RELEASE_TAG_PREFIX:-$RELEASE_TAG_PREFIX_DEFAULT}"
               CREATE_RELEASE="${INPUT_CREATE_RELEASE:-false}"
               ;;
@@ -87,6 +87,12 @@ jobs:
               exit 1
               ;;
           esac
+
+          # Use one canonical branch identity in manifests regardless of
+          # whether a maintainer selects the UI default or types the branch.
+          if [ "$SOURCE_REF" = "$INTEGRATION_BRANCH" ]; then
+            SOURCE_REF="refs/heads/$INTEGRATION_BRANCH"
+          fi
 
           case "$RELEASE_TAG_PREFIX" in
             *[!A-Za-z0-9._-]*)
