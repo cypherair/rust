@@ -6,12 +6,12 @@ on:
       source_ref:
         description: Branch, tag, or SHA to build.
         required: true
-        default: refs/heads/carry/cypherair-arm64e-toolchain-stable-1.97
+        default: refs/heads/rust-stable-with-arm64e
         type: string
       release_tag_prefix:
         description: Unique release tag prefix.
         required: true
-        default: rust-arm64e-stage1-stable197
+        default: rust-stage1-arm64e-toolchain
         type: string
       create_release:
         description: Publish the GitHub prerelease instead of uploading dry-run artifacts.
@@ -20,7 +20,7 @@ on:
         type: boolean
   push:
     branches:
-      - carry/cypherair-arm64e-toolchain-stable-1.97
+      - rust-stable-with-arm64e
   schedule:
     - cron: "17 10 * * 1"
 
@@ -34,8 +34,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  INTEGRATION_BRANCH: carry/cypherair-arm64e-toolchain-stable-1.97
-  RELEASE_TAG_PREFIX_DEFAULT: rust-arm64e-stage1-stable197
+  INTEGRATION_BRANCH: rust-stable-with-arm64e
+  RELEASE_TAG_PREFIX_DEFAULT: rust-stage1-arm64e-toolchain
   STABLE_BASE_RELEASE: "1.97.1"
   STABLE_BASE_COMMIT: 8bab26f4f68e0e26f0bb7960be334d5b520ea452
   STAGE1_ASSET_PREFIX: rust-stage1-for-arm64e
