@@ -197,11 +197,6 @@ jobs:
               ;;
           esac
 
-      - name: Fetch fork main for bootstrap ancestry checks
-        run: |
-          git fetch --no-tags --prune --depth=1 origin \
-            +refs/heads/main:refs/remotes/origin/main
-
       - name: Show runner and source environment
         run: |
           set -euo pipefail
@@ -214,7 +209,6 @@ jobs:
             uname -a
             df -h
             git show -s --format='HEAD: %H %P %ae %s' HEAD
-            git show -s --format='origin/main: %H %P %ae %s' refs/remotes/origin/main
             python3 --version
             clang --version
             rustc -vV || true
@@ -473,7 +467,6 @@ jobs:
           XCODE_VERSION="$(xcodebuild -version | tr '\n' ' ' | sed 's/  */ /g; s/ $//')"
           BUILT_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           TOOLCHAIN_SIZE_BYTES="$(stat -f%z "${ASSET_BASE}.tar.zst")"
-          UPSTREAM_MAIN_SHA="$(git rev-parse refs/remotes/origin/main)"
           export STAGE1_RUSTC_VERBOSE PACKAGED_LLC_VERBOSE
           export LLVM_IDENTITY_RELATIVE_PATH
 
@@ -490,7 +483,6 @@ jobs:
               "sourceRef": "${SOURCE_REF}",
               "sourceCommit": "${CHECKED_OUT_COMMIT}",
               "checkedOutCommit": "$(git rev-parse HEAD)",
-              "forkMainCommit": "${UPSTREAM_MAIN_SHA}",
               "stableBaseRelease": "${STABLE_BASE_RELEASE}",
               "stableBaseCommit": "${STABLE_BASE_COMMIT}",
               "requiresBuildStd": False,
