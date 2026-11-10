@@ -22,13 +22,18 @@ concurrency:
 jobs:
   arm64e:
     if: github.repository == 'cypherair/rust'
+    # The standard macOS arm64 images (`macos-15`, `macos-26`) are short of capacity: their jobs
+    # can wait and then be dropped without a runner. `xcode-27`, the macOS 27 image in public
+    # preview, gets runners. Its label may change when it becomes generally available.
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-26]
+        runner: [xcode-27]
     name: arm64e validation (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
+    env:
+      HOST_TRIPLE: aarch64-apple-darwin
     defaults:
       run:
         shell: bash
@@ -258,7 +263,6 @@ jobs:
         id: hello_diag
         continue-on-error: true
         run: |
-          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
 
           cat > /tmp/arm64e-diagnostics/arm64e_hello.rs <<'EOF'
@@ -281,7 +285,6 @@ jobs:
         id: thread_id_diag
         continue-on-error: true
         run: |
-          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
 
           cat > /tmp/arm64e-diagnostics/arm64e_thread_id.rs <<'EOF'
@@ -304,7 +307,6 @@ jobs:
         id: fnptr_diag
         continue-on-error: true
         run: |
-          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
 
           cat > /tmp/arm64e-diagnostics/arm64e_fnptr.rs <<'EOF'
@@ -338,7 +340,6 @@ jobs:
         id: tls_diag
         continue-on-error: true
         run: |
-          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
 
           cat > /tmp/arm64e-diagnostics/arm64e_tls_smoke.rs <<'EOF'
@@ -375,7 +376,6 @@ jobs:
         id: scope_diag
         continue-on-error: true
         run: |
-          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
 
           cat > /tmp/arm64e-diagnostics/arm64e_scope.rs <<'EOF'
