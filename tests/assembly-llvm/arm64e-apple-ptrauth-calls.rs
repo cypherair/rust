@@ -1,13 +1,20 @@
-// Indirect calls authenticate with `blraaz` or `braaz`; direct calls do not.
+// Indirect calls authenticate with `blraaz` or `braaz`; direct calls do not. A function that saves
+// its return address signs it with `pacibsp` and returns with `retab`.
 // Disabling `v8.3a` does not disable `paca` and `pacg`, which it implies: the backend keeps `pauth`
-// and still emits these instructions.
+// and still emits these instructions (without `pauth` it prints `pacibsp` as `hint #27`).
 //@ add-minicore
 //@ assembly-output: emit-asm
-//@ revisions: DEFAULT NO_V83A
-//@ [DEFAULT] compile-flags: --target arm64e-apple-darwin -Copt-level=2
-//@ [DEFAULT] needs-llvm-components: aarch64
+//@ revisions: DARWIN NO_V83A IOS TVOS VISIONOS
+//@ [DARWIN] compile-flags: --target arm64e-apple-darwin -Copt-level=2
+//@ [DARWIN] needs-llvm-components: aarch64
 //@ [NO_V83A] compile-flags: --target arm64e-apple-darwin -Copt-level=2 -Ctarget-feature=-v8.3a
 //@ [NO_V83A] needs-llvm-components: aarch64
+//@ [IOS] compile-flags: --target arm64e-apple-ios -Copt-level=2
+//@ [IOS] needs-llvm-components: aarch64
+//@ [TVOS] compile-flags: --target arm64e-apple-tvos -Copt-level=2
+//@ [TVOS] needs-llvm-components: aarch64
+//@ [VISIONOS] compile-flags: --target arm64e-apple-visionos -Copt-level=2
+//@ [VISIONOS] needs-llvm-components: aarch64
 
 #![crate_type = "lib"]
 #![feature(no_core, lang_items)]
@@ -47,4 +54,6 @@ pub extern "C" fn indirect_non_tail(f: extern "C" fn(i32) -> i32, x: i32) -> i32
 // CHECK: braaz
 
 // CHECK-LABEL: _indirect_non_tail:
+// CHECK: pacibsp
 // CHECK: blraaz
+// CHECK: retab

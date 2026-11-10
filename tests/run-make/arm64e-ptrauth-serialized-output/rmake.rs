@@ -1,19 +1,30 @@
+//! Inlining turns the call through a signed pointer in `devirtualized` into a direct call. In the
+//! IR, the bitcode and the embedded bitcode that rustc writes, that call must carry no `ptrauth`
+//! bundle.
+
 //@ needs-llvm-components: aarch64
 
 use std::path::{Path, PathBuf};
 
 use run_make_support::{llvm_ar, llvm_dis, llvm_objcopy, rfs, rustc};
 
+/// Checks that `devirtualized` still calls `target` directly, without a `ptrauth` bundle.
 fn assert_no_illegal_direct_ptrauth(path: &str) {
     let ir = rfs::read_to_string(path);
-    for (line_idx, line) in ir.lines().enumerate() {
-        if line.contains("@target(") && line.contains("\"ptrauth\"") {
-            panic!(
-                "{path}:{} contains a direct call with a ptrauth operand bundle:\n{line}",
-                line_idx + 1
-            );
-        }
-    }
+    let body: Vec<&str> = ir
+        .lines()
+        .skip_while(|line| !(line.starts_with("define ") && line.contains("@devirtualized(")))
+        .take_while(|line| *line != "}")
+        .collect();
+    assert!(!body.is_empty(), "{path} defines no `devirtualized`");
+    let call = body
+        .iter()
+        .find(|line| line.contains("@target("))
+        .unwrap_or_else(|| panic!("`devirtualized` in {path} no longer calls `target` directly"));
+    assert!(
+        !call.contains("\"ptrauth\""),
+        "{path}: the direct call carries a ptrauth operand bundle:\n{call}"
+    );
 }
 
 fn main() {

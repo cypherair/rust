@@ -1,6 +1,6 @@
 // ignore-tidy-linelength
 // `__rust_try`, which rustc generates for `catch_unwind`, carries the pointer-authentication
-// attributes, and its call through the `try_fn` pointer authenticates the callee.
+// attributes, and its calls through the `try_fn` and `catch_fn` pointers authenticate the callee.
 //@ add-minicore
 //@ revisions: DARWIN IOS TVOS VISIONOS
 //@ [DARWIN] compile-flags: --target arm64e-apple-darwin -Copt-level=0 -Cpanic=unwind -Zverify-llvm-ir
@@ -35,4 +35,5 @@ pub unsafe fn invoke_catch() -> bool {
 
 // CHECK: define internal {{.*}}@__rust_try({{.*}}) unnamed_addr [[TRY_ATTR:#[0-9]+]] personality
 // CHECK: invoke void %{{.*}}(ptr %{{.*}}){{.*}} [ "ptrauth"(i32 0, i64 0) ]
+// CHECK: call void %{{.*}}(ptr %{{.*}}, ptr %{{.*}}){{.*}} [ "ptrauth"(i32 0, i64 0) ]
 // CHECK: attributes [[TRY_ATTR]] = {{.*}} "ptrauth-auth-traps" "ptrauth-calls" "ptrauth-indirect-gotos" "ptrauth-returns"

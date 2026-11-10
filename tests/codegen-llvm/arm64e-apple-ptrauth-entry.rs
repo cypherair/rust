@@ -29,6 +29,6 @@ fn lang_start<T: 'static>(
 fn main() {}
 
 // CHECK: define i32 @main({{.*}}) unnamed_addr [[MAIN_ATTR:#[0-9]+]]
-// CHECK: call {{.*}}@{{.*}}lang_start{{.*}}(ptr ptrauth (ptr @{{.*}}4main{{.*}}, i32 0),
+// CHECK: call {{[^(]*}}@{{[^(]*}}lang_start{{[^(]*}}(ptr ptrauth (ptr @{{.*}}4main{{.*}}, i32 0),
 // CHECK: attributes [[MAIN_ATTR]] = {{.*}} "ptrauth-auth-traps" "ptrauth-calls"
 // CHECK-SAME: "ptrauth-indirect-gotos" "ptrauth-returns"

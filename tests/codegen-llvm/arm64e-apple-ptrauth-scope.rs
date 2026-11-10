@@ -99,6 +99,14 @@ pub fn call_rust_fn_ptr(f: fn() -> u32) -> u32 {
     f()
 }
 
+// CHECK-LABEL: @call_reified(
+// CHECK: call {{.*}}i32 ptrauth (ptr @{{.*}}rust_target{{.*}}, i32 0)(){{.*}} [ "ptrauth"(i32 0, i64 0) ]
+#[unsafe(no_mangle)]
+pub fn call_reified() -> u32 {
+    let f: fn() -> u32 = rust_target;
+    f()
+}
+
 // CHECK-LABEL: @call_dyn(
 // CHECK: call {{.*}}i32 %{{.*}}(ptr {{.*}}%{{.*}}){{.*}} [ "ptrauth"(i32 0, i64 0) ]
 #[unsafe(no_mangle)]

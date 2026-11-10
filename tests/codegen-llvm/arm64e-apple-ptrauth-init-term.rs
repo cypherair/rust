@@ -1,7 +1,9 @@
 // ignore-tidy-linelength
-// Clang on Darwin does not sign initializer or terminator pointers, so on arm64e Apple targets the
-// entries of `__mod_init_func` and `__mod_term_func` stay unsigned, whether the section is named
-// or typed. The same function pointer in an ordinary static is signed.
+// On arm64e Apple targets the entries of `__mod_init_func` and `__mod_term_func` stay unsigned,
+// whether the section is named or typed, like the constructors clang emits itself. (Clang signs a
+// static that C code places in these sections by hand.) Either form works: Apple's linker turns
+// initializer entries into offsets and dyld re-signs them, and dyld ignores `__mod_term_func` on
+// arm64e. The same function pointer in an ordinary static is signed.
 //@ add-minicore
 //@ revisions: DARWIN IOS TVOS VISIONOS
 //@ [DARWIN] compile-flags: --target arm64e-apple-darwin
@@ -42,6 +44,11 @@ static BY_TYPE: extern "C" fn() = init_fn;
 #[used]
 #[unsafe(link_section = "__DATA,__mod_term_func,mod_term_funcs")]
 static TERM: extern "C" fn(i32) = term_fn;
+
+// CHECK-DAG: @{{.*}}TERM_BY_TYPE = {{.*}}constant ptr @{{.*}}term_fn{{.*}}, section "__DATA,__terms,mod_term_funcs"
+#[used]
+#[unsafe(link_section = "__DATA,__terms,mod_term_funcs")]
+static TERM_BY_TYPE: extern "C" fn(i32) = term_fn;
 
 // CHECK-DAG: @{{.*}}ORDINARY = {{.*}}constant ptr ptrauth (ptr @{{.*}}init_fn{{.*}}, i32 0)
 #[used]

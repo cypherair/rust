@@ -14,15 +14,14 @@ pub trait Sized: MetaSized {}
 #[lang = "copy"]
 pub trait Copy: Sized {}
 
-#[inline(never)]
-#[no_mangle]
-pub extern "C" fn target(x: i32) -> i32 {
-    x
+// External, so that LLVM cannot remove the call once it is direct.
+extern "C" {
+    fn target(x: i32) -> i32;
 }
 
 #[inline(always)]
-fn call_indirect(f: extern "C" fn(i32) -> i32, x: i32) -> i32 {
-    f(x)
+fn call_indirect(f: unsafe extern "C" fn(i32) -> i32, x: i32) -> i32 {
+    unsafe { f(x) }
 }
 
 #[no_mangle]
