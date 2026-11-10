@@ -219,7 +219,7 @@ jobs:
           To check that this workflow built the toolchain from that commit:
 
           \`\`\`bash
-          gh attestation verify ${ASSET} -R ${GITHUB_REPOSITORY} --source-ref ${GITHUB_REF} --source-digest ${GITHUB_SHA}
+          gh attestation verify ${ASSET} -R ${GITHUB_REPOSITORY} --signer-workflow ${GITHUB_REPOSITORY}/.github/workflows/arm64e-stage1-prerelease.yml --source-ref ${GITHUB_REF} --source-digest ${GITHUB_SHA}
           \`\`\`
           EOF
           gh release create "$tag" "$ASSET" \
