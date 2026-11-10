@@ -108,7 +108,8 @@ def main():
           f"{n_auth} authenticated pointers in data, {len(problems)} problems")
     for problem in problems[:200]:
         print(problem)
-    if not objects or not n_functions or not n_auth or problems:
+    # The data check needs the function symbols to recognise a relocation to a function.
+    if not objects or not functions or not n_functions or not n_auth or problems:
         sys.exit(1)
 
 

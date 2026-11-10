@@ -282,7 +282,6 @@ jobs:
       - name: Diagnose arm64e hello runtime
         id: hello_diag
         if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
-        continue-on-error: true
         run: |
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
 
@@ -305,7 +304,6 @@ jobs:
       - name: Diagnose arm64e thread id runtime
         id: thread_id_diag
         if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
-        continue-on-error: true
         run: |
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
 
@@ -328,7 +326,6 @@ jobs:
       - name: Diagnose arm64e function pointer runtime
         id: fnptr_diag
         if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
-        continue-on-error: true
         run: |
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
 
@@ -362,7 +359,6 @@ jobs:
       - name: Diagnose arm64e TLS runtime
         id: tls_diag
         if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
-        continue-on-error: true
         run: |
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
 
@@ -618,10 +614,10 @@ jobs:
           print("- tidy: ${{ steps.tidy.outcome }}")
           print("- build_stage1: ${{ steps.build_stage1.outcome }}")
           print("- std_objects: ${{ steps.std_objects.outcome }}")
-          print("- hello_diag (non-blocking): ${{ steps.hello_diag.outcome }}")
-          print("- thread_id_diag (non-blocking): ${{ steps.thread_id_diag.outcome }}")
-          print("- fnptr_diag (non-blocking): ${{ steps.fnptr_diag.outcome }}")
-          print("- tls_diag (non-blocking): ${{ steps.tls_diag.outcome }}")
+          print("- hello_diag: ${{ steps.hello_diag.outcome }}")
+          print("- thread_id_diag: ${{ steps.thread_id_diag.outcome }}")
+          print("- fnptr_diag: ${{ steps.fnptr_diag.outcome }}")
+          print("- tls_diag: ${{ steps.tls_diag.outcome }}")
           print("- scope_diag: ${{ steps.scope_diag.outcome }}")
           print("- unwind_diag: ${{ steps.unwind_diag.outcome }}")
           print("- enforce_diag: ${{ steps.enforce_diag.outcome }}")
@@ -653,7 +649,7 @@ jobs:
                   f"{file_output} | {stdout} | {asm_hits} |"
               )
           print()
-          print("The hello, thread_id, fnptr and tls cases are non-blocking diagnostics. Everything else is blocking.")
+          print("Every step is blocking. A runner that cannot run arm64e fails the runtime cases.")
           PY
 
           {
