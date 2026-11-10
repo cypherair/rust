@@ -65,31 +65,15 @@ def operands(ops):
     return [register(o) for o in ops.split("[")[0].split(",") if o.strip()]
 
 
-# Instructions that write no register named in their operands.
-NO_DESTINATION = re.compile(
-    r"^(b|b\..*|bl|blr.*|br.*|cbn?z|tbn?z|ret.*|eret.*|cmp|cmn|tst|f?ccmp|ccmn|fcmpe?|nop|"
-    r"prfu?m|dmb|dsb|isb|hint|brk|udf|msr|sys|bti|clrex|yield|wf[ei]|sevl?|csdb)$"
-)
-STORE = re.compile(r"^st(?!l?xr|l?xp)")  # store-exclusives write their status register
-WRITEBACK = re.compile(r"\[(x\d+|sp)(?:,[^\]]*)?\]!|\[(x\d+|sp)\],")
-# A call may leave anything in the caller-saved registers.
-CALL = re.compile(r"^(bl|blr.*)$")
-CALL_CLOBBERED = {f"x{n}" for n in range(19)} | {"x30"}
-NO_FALLTHROUGH = re.compile(r"^(b|br.*|ret.*|brk|udf)$")
+# Register instructions that write no register named in their operands.
+NO_DESTINATION = re.compile(r"^(cmp|cmn|tst|f?ccmp|ccmn|fcmpe?|nop|hint|msr|bti|csdb)$")
+# Branches and calls, conditional or not: each ends a basic block or leaves it.
+BRANCH = re.compile(r"^(b|b\..*|bl|blr.*|br.*|cbn?z|tbn?z|ret.*|eret.*|brk|udf)$")
 
 
 def writes(mnemonic, ops):
-    """The registers an instruction writes."""
-    if CALL.match(mnemonic):
-        return CALL_CLOBBERED
-    written = set()
-    if m := WRITEBACK.search(ops):
-        written.add(m.group(1) or m.group(2))
-    if NO_DESTINATION.match(mnemonic) or STORE.match(mnemonic):
-        return written
-    names = operands(ops)
-    count = 2 if mnemonic in ("ldp", "ldnp", "ldpsw", "ldxp", "ldaxp") else 1
-    return written | set(names[:count])
+    """The register that a register instruction writes: its first operand, if it has one."""
+    return set() if NO_DESTINATION.match(mnemonic) else set(operands(ops)[:1])
 
 
 # The table load and the `add` of LLVM's plain dispatch (`LowerJumpTableDest`), by entry size.
@@ -107,10 +91,12 @@ def is_plain_dispatch(insns, i):
     (target,) = operands(insns[i][1])
     for k in range(i - 1, -1, -1):
         mnemonic, ops = insns[k]
+        # Only register instructions stand between LLVM's `add` and its `br`. A branch, a call or
+        # any access to memory (which may write a register, as `swp` and `casp` do) rejects it.
+        if BRANCH.match(mnemonic) or "[" in ops:
+            return False
         if target in writes(mnemonic, ops):
             break
-        if NO_FALLTHROUGH.match(mnemonic):
-            return False
     else:
         return False
     if mnemonic != "add" or k < 2:
