@@ -251,12 +251,13 @@ jobs:
             tests/ui/statics/crt-static-pauthtest.rs \
             tests/ui/target_modifiers/incompatible_pauth.rs
 
+      # `library/test` lets `cargo test` build for the arm64e targets.
       - name: Build stage1 compiler and Apple std payload
         run: |
           set -euo pipefail
           ARM64E_TARGETS="arm64e-apple-darwin,arm64e-apple-ios,arm64e-apple-tvos,arm64e-apple-visionos"
           python3 x.py --set llvm.download-ci-llvm=false \
-            build compiler/rustc library/std library/proc_macro --stage 1 \
+            build compiler/rustc library/std library/proc_macro library/test --stage 1 \
             --target "${HOST_TRIPLE},${ARM64E_TARGETS}"
 
       - name: Check the arm64e std objects
@@ -354,6 +355,7 @@ jobs:
           for target in "${PREBUILT_STD_TARGETS[@]}"; do
             LIBDIR="$(./dist/stage1-arm64e-patch/bin/rustc --print target-libdir --target "$target")"
             test -n "$(find "$LIBDIR" -maxdepth 1 -name 'libstd-*.rlib' -print -quit)"
+            test -n "$(find "$LIBDIR" -maxdepth 1 -name 'libtest-*.rlib' -print -quit)"
           done
           HOST_LIBDIR="$(./dist/stage1-arm64e-patch/bin/rustc --print target-libdir --target "$HOST_TRIPLE")"
           test -n "$(find "$HOST_LIBDIR" -maxdepth 1 -name 'libproc_macro-*.rlib' -print -quit)"
@@ -388,6 +390,23 @@ jobs:
             "$DIAGNOSTICS_DIR/hello-arm64e" | tee "$DIAGNOSTICS_DIR/hello-arm64e-run.txt"
           else
             echo "Skipping arm64e binary execution on ${HOST_TRIPLE}" | tee "$DIAGNOSTICS_DIR/hello-arm64e-run.txt"
+          fi
+
+          cat > "$DIAGNOSTICS_DIR/harness.rs" <<'EOF'
+          #[test]
+          fn adds() {
+              assert_eq!(std::hint::black_box(2) + 2, 4);
+          }
+          EOF
+          "./dist/stage1-arm64e-patch/bin/rustc" \
+            "$DIAGNOSTICS_DIR/harness.rs" \
+            --test \
+            --target arm64e-apple-darwin \
+            -O \
+            -o "$DIAGNOSTICS_DIR/harness-arm64e"
+          if [ "$HOST_TRIPLE" = "aarch64-apple-darwin" ]; then
+            "$DIAGNOSTICS_DIR/harness-arm64e" | tee "$DIAGNOSTICS_DIR/harness-arm64e-run.txt"
+            grep -q '^test result: ok\. 1 passed' "$DIAGNOSTICS_DIR/harness-arm64e-run.txt"
           fi
 
           SMOKE_ROOT="$DIAGNOSTICS_DIR/generic-array-smoke"
