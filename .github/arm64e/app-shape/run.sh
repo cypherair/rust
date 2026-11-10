@@ -1,6 +1,7 @@
 #!/bin/bash
 # Builds lib.rs as a static library with RUSTC, links it into host.c with clang, runs the host and
-# checks what it prints. A panic that escapes an `extern "C"` function must abort cleanly.
+# checks what it prints. A panic that escapes an `extern "C"` function must abort cleanly, and a
+# call through an unsigned function pointer must kill the host.
 # Usage: run.sh RUSTC OPT_LEVEL OUT_DIR [TARGET [CLANG_ARCH]]
 set -euo pipefail
 
@@ -53,3 +54,14 @@ if [ "$status" != 134 ] || ! grep -q "cannot unwind" "$out/escape.stderr"; then
     exit 1
 fi
 echo "escaping panic: aborted cleanly"
+
+# The cases above pass on a machine that runs arm64e with pointer authentication off. This one
+# does not.
+run_host unsigned unsigned
+if [ "$status" -le 128 ]; then
+    echo "a call through an unsigned function pointer must kill the host; exit status was" \
+        "$status, output: $stdout" >&2
+    cat "$out/unsigned.stderr" >&2
+    exit 1
+fi
+echo "unsigned call: killed by signal $((status - 128))"

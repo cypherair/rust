@@ -1,5 +1,6 @@
 // A C host for the Rust static library in lib.rs, built and linked by clang.
 #include <pthread.h>
+#include <ptrauth.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -31,6 +32,13 @@ static void *foreign_thread(void *result) {
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "escape") == 0) {
         rust_escaping_panic();
+        return 0;
+    }
+    if (argc > 1 && strcmp(argv[1], "unsigned") == 0) {
+        // Rust's function pointer with its signature stripped: the authenticated call must fail.
+        uint32_t (*square)(uint32_t) =
+            ptrauth_strip(rust_table().square, ptrauth_key_function_pointer);
+        printf("returned %u\n", square(7));
         return 0;
     }
     rust_register((Callbacks){host_add});
