@@ -118,8 +118,10 @@ jobs:
         id: tidy
         if: ${{ !cancelled() }}
         run: |
-          # A stable release pins no stage 0 rustfmt; tidy's format check uses the runner's.
-          python3 x.py test --stage 1 tidy --set build.rustfmt="$(rustup which rustfmt)"
+          # On the stable channel, as in upstream's CI for stable releases, tidy skips its rustfmt
+          # check: a stable release pins no stage 0 rustfmt, and bootstrap passes nightly-only
+          # flags to it. This step builds no compiler, so the channel changes nothing else.
+          python3 x.py test --stage 1 tidy --set rust.channel=stable
 
       - name: Build stage1 arm64e std toolchain
         id: build_stage1
