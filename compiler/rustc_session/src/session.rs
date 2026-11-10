@@ -200,7 +200,7 @@ impl PointerAuthConfig {
     /// The arm64e ABI of Apple's platforms, as clang's Darwin driver sets it up. C function
     /// pointers use key IA with no diversity. Rust function pointers and v-table entries use the
     /// same schema, so that Rust's indirect calls are as protected as those of the C and Swift
-    /// code in the same process.
+    /// code in the same process. Initializer and terminator entries are not signed.
     fn arm64e_apple(target: &Target) -> Self {
         Self {
             scope: PointerAuthScope::AllFunctions,

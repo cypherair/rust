@@ -17,7 +17,7 @@ use rustc_middle::ty::layout::{HasTypingEnv, LayoutOf};
 use rustc_middle::ty::{self, Instance};
 use rustc_session::PointerAuthScope;
 use rustc_span::{Symbol, bug, span_bug};
-use rustc_target::spec::Arch;
+use rustc_target::spec::{Arch, BinaryFormat};
 use tracing::{debug, instrument, trace};
 
 use crate::common::CodegenCx;
@@ -168,7 +168,11 @@ fn codegen_static_initializer<'ll, 'tcx>(
         .link_section
         .map(|link_section| {
             let s = link_section.as_str();
-            if s.starts_with(".init_array") || s.starts_with(".fini_array") {
+            if s.starts_with(".init_array")
+                || s.starts_with(".fini_array")
+                || (cx.sess().target.binary_format == BinaryFormat::MachO
+                    && is_macho_init_term_section(s))
+            {
                 IsInitOrFini::Yes
             } else {
                 IsInitOrFini::No
@@ -176,6 +180,16 @@ fn codegen_static_initializer<'ll, 'tcx>(
         })
         .unwrap_or(IsInitOrFini::No);
     Ok((const_alloc_to_llvm(cx, alloc.inner(), IsStatic::Yes, is_in_init_fini), alloc))
+}
+
+/// Whether a Mach-O section specifier, `segment,section[,type[,attributes]]`, names a section of
+/// initializer or terminator pointers.
+fn is_macho_init_term_section(specifier: &str) -> bool {
+    let mut parts = specifier.split(',').map(str::trim).skip(1);
+    let name = parts.next();
+    let section_type = parts.next();
+    matches!(name, Some("__mod_init_func" | "__mod_term_func"))
+        || matches!(section_type, Some("mod_init_funcs" | "mod_term_funcs"))
 }
 
 fn set_global_alignment<'ll>(cx: &CodegenCx<'ll, '_>, gv: &'ll Value, mut align: Align) {
