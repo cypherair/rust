@@ -211,7 +211,9 @@ cfg_select! {
         #[rustc_force_inline]
         unsafe fn sign_lpad(context: *mut uw::_Unwind_Context, lpad: *const u8) -> *const u8 {
             cfg_select! {
-                all(target_abi = "pauthtest", target_arch = "aarch64") => {
+                // An unwinder that authenticates return addresses wants the landing pad signed
+                // with key IB and the stack pointer, as a return address would be.
+                any(all(target_abi = "pauthtest", target_arch = "aarch64"), arm64e_apple) => {
                     // DWARF register number for SP on AArch64.
                     const SP_REG: i32 = 31;
 

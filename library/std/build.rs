@@ -81,6 +81,14 @@ fn main() {
 
     println!("cargo:rustc-env=STD_ENV_ARCH={}", env::var("CARGO_CFG_TARGET_ARCH").unwrap());
 
+    // The arm64e ABI on Apple platforms signs code pointers, and its unwinder expects signed
+    // landing pads. No `cfg` tells these targets from plain arm64, so recognise them by name.
+    // A cfg seen only by std keeps this out of `target_abi`, which every build script reads.
+    println!("cargo:rustc-check-cfg=cfg(arm64e_apple)");
+    if target_vendor == "apple" && env::var("TARGET").is_ok_and(|t| t.starts_with("arm64e-")) {
+        println!("cargo:rustc-cfg=arm64e_apple");
+    }
+
     println!("cargo:rustc-check-cfg=cfg(vxworks_lt_25_09)");
 
     if target_os == "vxworks" {
