@@ -73,6 +73,22 @@ jobs:
           fi
           git log --oneline -n2 --first-parent HEAD
 
+      # The channel and std of the toolchain that ships (`arm64e-stage1-prerelease.yml`). On the
+      # default `dev` channel, the compiler would turn on the next trait solver and Polonius by
+      # default. LLVM stays upstream's prebuilt one.
+      - name: Configure the build
+        run: |
+          set -euo pipefail
+          cat > bootstrap.toml <<'EOF'
+          change-id = "ignore"
+
+          [build]
+          optimized-compiler-builtins = false
+
+          [rust]
+          channel = "stable"
+          EOF
+
       - name: Show environment
         run: |
           mkdir -p /tmp/arm64e-diagnostics
@@ -120,8 +136,8 @@ jobs:
         run: |
           # On the stable channel, as in upstream's CI for stable releases, tidy skips its rustfmt
           # check: a stable release pins no stage 0 rustfmt, and bootstrap passes nightly-only
-          # flags to it. This step builds no compiler, so the channel changes nothing else.
-          python3 x.py test --stage 1 tidy --set rust.channel=stable
+          # flags to it.
+          python3 x.py test --stage 1 tidy
 
       - name: Build stage1 arm64e std toolchain
         id: build_stage1
