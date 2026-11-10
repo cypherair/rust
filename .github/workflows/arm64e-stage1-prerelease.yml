@@ -1,32 +1,17 @@
 name: arm64e Stage1 Prerelease
 
-# Builds the stage1 toolchain with arm64e std, from LLVM's own source, and checks it. Only a manual
-# run with `create_release` publishes a prerelease; every other run, a trial build included, keeps
-# its toolchain as a workflow artifact for seven days.
+# Builds the stage1 toolchain with arm64e std, from LLVM's own source, at the commit the run is
+# dispatched on, and checks it. Only a run with `create_release` publishes a prerelease; any other
+# run keeps the toolchain as a workflow artifact for seven days.
 
 on:
   workflow_dispatch:
     inputs:
-      source_ref:
-        description: Branch, tag, or SHA to build.
-        required: true
-        default: refs/heads/rust-stable-with-arm64e
-        type: string
-      release_tag_prefix:
-        description: Unique release tag prefix.
-        required: true
-        default: rust-stage1-arm64e-toolchain
-        type: string
       create_release:
-        description: Publish the GitHub prerelease instead of uploading dry-run artifacts.
+        description: Publish a prerelease instead of keeping the toolchain as a workflow artifact.
         required: true
         default: false
         type: boolean
-  push:
-    branches:
-      - rust-stable-with-arm64e
-  schedule:
-    - cron: "17 10 * * 1"
 
 permissions:
   contents: write
@@ -34,139 +19,28 @@ permissions:
   attestations: write
 
 concurrency:
-  group: arm64e-stage1-prerelease-${{ github.ref }}-${{ github.event_name }}
+  group: arm64e-stage1-prerelease-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  INTEGRATION_BRANCH: rust-stable-with-arm64e
-  RELEASE_TAG_PREFIX_DEFAULT: rust-stage1-arm64e-toolchain
-  STABLE_BASE_RELEASE: "1.100.0"
-  STABLE_BASE_COMMIT: 0ef1bc386059596dada8fb65b50425aab2ea637a
-  STAGE1_ASSET_PREFIX: rust-stage1-for-arm64e
+  ASSET: rust-stage1-for-arm64e-aarch64-apple-darwin.tar.zst
 
 jobs:
-  resolve-release:
+  build:
     if: github.repository == 'cypherair/rust'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-    outputs:
-      source_ref: ${{ steps.resolve.outputs.source_ref }}
-      release_tag_prefix: ${{ steps.resolve.outputs.release_tag_prefix }}
-      create_release: ${{ steps.resolve.outputs.create_release }}
-      checked_out_commit: ${{ steps.metadata.outputs.checked_out_commit }}
-      release_tag: ${{ steps.metadata.outputs.release_tag }}
-      release_title: ${{ steps.metadata.outputs.release_title }}
-      release_url: ${{ steps.metadata.outputs.release_url }}
-      workflow_url: ${{ steps.metadata.outputs.workflow_url }}
-    steps:
-      - name: Resolve release settings
-        id: resolve
-        env:
-          INPUT_SOURCE_REF: ${{ github.event.inputs.source_ref }}
-          INPUT_RELEASE_TAG_PREFIX: ${{ github.event.inputs.release_tag_prefix }}
-          INPUT_CREATE_RELEASE: ${{ github.event.inputs.create_release }}
-        run: |
-          set -euo pipefail
-
-          case "$GITHUB_EVENT_NAME" in
-            workflow_dispatch)
-              SOURCE_REF="${INPUT_SOURCE_REF:-refs/heads/$INTEGRATION_BRANCH}"
-              RELEASE_TAG_PREFIX="${INPUT_RELEASE_TAG_PREFIX:-$RELEASE_TAG_PREFIX_DEFAULT}"
-              CREATE_RELEASE="${INPUT_CREATE_RELEASE:-false}"
-              ;;
-            push)
-              SOURCE_REF="$GITHUB_REF"
-              RELEASE_TAG_PREFIX="$RELEASE_TAG_PREFIX_DEFAULT"
-              CREATE_RELEASE="false"
-              ;;
-            schedule)
-              SOURCE_REF="refs/heads/$INTEGRATION_BRANCH"
-              RELEASE_TAG_PREFIX="$RELEASE_TAG_PREFIX_DEFAULT"
-              CREATE_RELEASE="false"
-              ;;
-            *)
-              echo "::error::Unsupported event: $GITHUB_EVENT_NAME"
-              exit 1
-              ;;
-          esac
-
-          # Use one canonical branch identity in manifests regardless of
-          # whether a maintainer selects the UI default or types the branch.
-          if [ "$SOURCE_REF" = "$INTEGRATION_BRANCH" ]; then
-            SOURCE_REF="refs/heads/$INTEGRATION_BRANCH"
-          fi
-
-          case "$RELEASE_TAG_PREFIX" in
-            *[!A-Za-z0-9._-]*)
-              echo "::error::release_tag_prefix may only contain letters, numbers, dots, underscores, and hyphens."
-              exit 1
-              ;;
-          esac
-
-          {
-            echo "source_ref=$SOURCE_REF"
-            echo "release_tag_prefix=$RELEASE_TAG_PREFIX"
-            echo "create_release=$CREATE_RELEASE"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Checkout source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 2
-          ref: ${{ steps.resolve.outputs.source_ref }}
-
-      - name: Resolve release metadata
-        id: metadata
-        env:
-          RELEASE_TAG_PREFIX: ${{ steps.resolve.outputs.release_tag_prefix }}
-        run: |
-          set -euo pipefail
-
-          CHECKED_OUT_COMMIT="$(git rev-parse HEAD)"
-          RELEASE_TIMESTAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
-          SHORT_SHA="$(git rev-parse --short=7 HEAD)"
-          RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT:-1}"
-          RELEASE_TAG="${RELEASE_TAG_PREFIX}-${RELEASE_TIMESTAMP}-${SHORT_SHA}-r${GITHUB_RUN_ID}-a${RUN_ATTEMPT}"
-          RELEASE_TITLE="Rust arm64e stage1 toolchains (${RELEASE_TAG})"
-          RELEASE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
-          WORKFLOW_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-
-          {
-            echo "checked_out_commit=$CHECKED_OUT_COMMIT"
-            echo "release_tag=$RELEASE_TAG"
-            echo "release_title=$RELEASE_TITLE"
-            echo "release_url=$RELEASE_URL"
-            echo "workflow_url=$WORKFLOW_URL"
-          } >> "$GITHUB_OUTPUT"
-
-  build-stage1:
-    if: github.repository == 'cypherair/rust'
-    needs: resolve-release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # GitHub's arm64 `macos-26` image is short of capacity; `xcode-27` gets runners. Its
-          # Xcode is the one the app builds with.
-          - runner_label: xcode-27
-            expected_host_triple: aarch64-apple-darwin
-            xcode_app: /Applications/Xcode_27.2.app
-    name: build-stage1 (${{ matrix.expected_host_triple }})
-    runs-on: ${{ matrix.runner_label }}
+    # GitHub's arm64 `macos-26` image is short of capacity; `xcode-27` gets runners. Its Xcode is
+    # the one the app builds with.
+    runs-on: xcode-27
     timeout-minutes: 360
     defaults:
       run:
         shell: bash
+    outputs:
+      rustc_version: ${{ steps.package.outputs.rustc_version }}
     env:
-      SOURCE_REF: ${{ needs.resolve-release.outputs.source_ref }}
-      CREATE_RELEASE: ${{ needs.resolve-release.outputs.create_release }}
-      RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
-      RELEASE_URL: ${{ needs.resolve-release.outputs.release_url }}
-      WORKFLOW_URL: ${{ needs.resolve-release.outputs.workflow_url }}
-      CHECKED_OUT_COMMIT: ${{ needs.resolve-release.outputs.checked_out_commit }}
-      EXPECTED_HOST_TRIPLE: ${{ matrix.expected_host_triple }}
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      HOST_TRIPLE: aarch64-apple-darwin
+      ARM64E_TARGETS: arm64e-apple-darwin arm64e-apple-ios arm64e-apple-visionos
       # Verify the LLVM IR of everything the stage1 compiler builds, std for every target included.
       # `rust.verify-llvm-ir` would be compiled into rustc itself.
       RUSTFLAGS_NOT_BOOTSTRAP: -Zverify-llvm-ir
@@ -175,65 +49,26 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
-          ref: ${{ needs.resolve-release.outputs.source_ref }}
           submodules: recursive
 
-      - name: Select Xcode
-        env:
-          XCODE_APP: ${{ matrix.xcode_app }}
+      # Settings for every x.py call below.
+      - name: Configure the build
         run: |
           set -euo pipefail
-          if [ ! -d "${XCODE_APP}/Contents/Developer" ]; then
-            echo "::error::${XCODE_APP} is not on this runner."
-            ls -d /Applications/Xcode*.app || true
-            exit 1
-          fi
-          echo "DEVELOPER_DIR=${XCODE_APP}/Contents/Developer" >> "$GITHUB_ENV"
-          DEVELOPER_DIR="${XCODE_APP}/Contents/Developer" xcodebuild -version
+          cat > bootstrap.toml <<'EOF'
+          change-id = "ignore"
 
-      - name: Show runner and source environment
-        run: |
-          set -euo pipefail
-          mkdir -p "/tmp/arm64e-stage1-diagnostics-${EXPECTED_HOST_TRIPLE}"
-          {
-            echo "event=${GITHUB_EVENT_NAME}"
-            echo "source_ref=${SOURCE_REF}"
-            echo "expected_host_triple=${EXPECTED_HOST_TRIPLE}"
-            sw_vers
-            uname -a
-            df -h
-            git show -s --format='HEAD: %H %P %ae %s' HEAD
-            python3 --version
-            clang --version
-            rustc -vV || true
-          } | tee "/tmp/arm64e-stage1-diagnostics-${EXPECTED_HOST_TRIPLE}/runner-fingerprint.txt"
+          [llvm]
+          download-ci-llvm = false
+          EOF
+          sw_vers
+          xcodebuild -version
 
-      - name: Assert host triple
-        run: |
-          set -euo pipefail
-
-          HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
-          if [ "$HOST_TRIPLE" != "$EXPECTED_HOST_TRIPLE" ]; then
-            echo "::error::Expected host triple ${EXPECTED_HOST_TRIPLE}, got ${HOST_TRIPLE}"
-            exit 1
-          fi
-
-          ASSET_BASE="${STAGE1_ASSET_PREFIX}-${HOST_TRIPLE}"
-          DIAGNOSTICS_ASSET="arm64e-stage1-diagnostics-${HOST_TRIPLE}.tar.zst"
-          {
-            echo "HOST_TRIPLE=$HOST_TRIPLE"
-            echo "ASSET_BASE=$ASSET_BASE"
-            echo "DIAGNOSTICS_ASSET=$DIAGNOSTICS_ASSET"
-          } >> "$GITHUB_ENV"
-
-      # The validation workflow's test list, here against the LLVM this toolchain is built with.
+      # The validation workflow's test list, against the compiler and LLVM that this run ships.
       - name: Run the arm64e and pauthtest tests
         run: |
           set -euo pipefail
-          python3 x.py --set llvm.download-ci-llvm=false \
-            check compiler/rustc_codegen_ssa compiler/rustc_codegen_llvm --stage 1
-          python3 x.py --set llvm.download-ci-llvm=false \
-            test --stage 1 --force-rerun --no-fail-fast \
+          python3 x.py test --stage 1 --force-rerun --no-fail-fast \
             tests/codegen-llvm/arm64e-apple-ptrauth*.rs \
             tests/assembly-llvm/arm64e-apple-ptrauth-calls.rs \
             tests/assembly-llvm/targets/targets-macho.rs \
@@ -249,21 +84,19 @@ jobs:
             tests/ui/target_modifiers/incompatible_pauth.rs
 
       # `library/test` lets `cargo test` build for the arm64e targets.
-      - name: Build stage1 compiler and Apple std payload
+      - name: Build the compiler and std
         run: |
           set -euo pipefail
-          ARM64E_TARGETS="arm64e-apple-darwin,arm64e-apple-ios,arm64e-apple-tvos,arm64e-apple-visionos"
-          python3 x.py --set llvm.download-ci-llvm=false \
-            build compiler/rustc library/std library/proc_macro library/test --stage 1 \
-            --target "${HOST_TRIPLE},${ARM64E_TARGETS}"
+          python3 x.py build --stage 1 compiler/rustc library/std library/proc_macro library/test \
+            --target "$HOST_TRIPLE,${ARM64E_TARGETS// /,}"
 
       - name: Check the arm64e std objects
         run: |
           set -euo pipefail
-          for target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
-            echo "=== ${target}"
-            python3 -I .github/arm64e/check_objects.py "build/${HOST_TRIPLE}/llvm/bin" \
-              "build/${HOST_TRIPLE}/stage1/lib/rustlib/${target}/lib/"*.rlib
+          for target in $ARM64E_TARGETS; do
+            echo "=== $target"
+            python3 -I .github/arm64e/check_objects.py "build/$HOST_TRIPLE/llvm/bin" \
+              "build/$HOST_TRIPLE/stage1/lib/rustlib/$target/lib/"*.rlib
           done
 
       # A Rust static library in a clang-built host, at -O and -O0, and the object check on the
@@ -271,647 +104,119 @@ jobs:
       - name: Run the app-shape case and check the linked binaries
         run: |
           set -euo pipefail
-          DIAGNOSTICS_DIR="/tmp/arm64e-stage1-diagnostics-${HOST_TRIPLE}"
           for opt in 2 0; do
-            .github/arm64e/app-shape/run.sh "build/${HOST_TRIPLE}/stage1/bin/rustc" "$opt" \
-              "${DIAGNOSTICS_DIR}/app-shape-O${opt}"
+            .github/arm64e/app-shape/run.sh "build/$HOST_TRIPLE/stage1/bin/rustc" "$opt" \
+              "$RUNNER_TEMP/app-shape-O$opt"
           done
-          python3 -I .github/arm64e/check_objects.py "build/${HOST_TRIPLE}/llvm/bin" --linked \
-            "${DIAGNOSTICS_DIR}/app-shape-O2/host" "${DIAGNOSTICS_DIR}/app-shape-O0/host"
+          python3 -I .github/arm64e/check_objects.py "build/$HOST_TRIPLE/llvm/bin" --linked \
+            "$RUNNER_TEMP/app-shape-O2/host" "$RUNNER_TEMP/app-shape-O0/host"
 
-      - name: Package minimal stage1 toolchain
+      - name: Package the toolchain
+        id: package
         run: |
           set -euo pipefail
-
-          STAGE1="build/${HOST_TRIPLE}/stage1"
-          DIAGNOSTICS_DIR="/tmp/arm64e-stage1-diagnostics-${HOST_TRIPLE}"
-          if [ ! -x "$STAGE1/bin/rustc" ]; then
-            echo "::error::stage1 rustc missing at $STAGE1/bin/rustc"
-            exit 1
-          fi
-          LLVM_GITLINK_COMMIT="$(git rev-parse HEAD:src/llvm-project)"
-          LLVM_CHECKED_OUT_COMMIT="$(git -C src/llvm-project rev-parse HEAD)"
-          if [ "$LLVM_CHECKED_OUT_COMMIT" != "$LLVM_GITLINK_COMMIT" ]; then
-            echo "::error::LLVM checkout ${LLVM_CHECKED_OUT_COMMIT} does not match gitlink ${LLVM_GITLINK_COMMIT}."
-            exit 1
-          fi
-          if [ -n "$(git -C src/llvm-project status --porcelain)" ]; then
-            echo "::error::LLVM checkout must be clean before packaging."
+          if [ -e "build/$HOST_TRIPLE/ci-llvm" ]; then
+            echo "::error::build/$HOST_TRIPLE/ci-llvm exists: bootstrap used upstream's prebuilt LLVM."
             exit 1
           fi
 
-          LLVM_VERSION_FILE="src/llvm-project/cmake/Modules/LLVMVersion.cmake"
-          llvm_version_component() {
-            local component="$1"
-            local value
-            value="$(sed -nE "s/^[[:space:]]*set\\(LLVM_VERSION_${component}[[:space:]]+([0-9]+)\\)[[:space:]]*$/\\1/p" "$LLVM_VERSION_FILE")"
-            if ! [[ "$value" =~ ^[0-9]+$ ]]; then
-              echo "::error::Could not derive unique LLVM ${component} version from ${LLVM_VERSION_FILE}." >&2
-              exit 1
-            fi
-            printf '%s' "$value"
-          }
-          LLVM_SOURCE_VERSION="$(llvm_version_component MAJOR).$(llvm_version_component MINOR).$(llvm_version_component PATCH)"
+          dist="dist/stage1-arm64e-patch"
+          rsync -a --delete "build/$HOST_TRIPLE/stage1/" "$dist/"
+          find "$dist" -name '*.dSYM' -prune -exec rm -rf {} +
+          src="$dist/lib/rustlib/src/rust"
+          rm -rf "$src"
+          mkdir -p "$src/src/llvm-project"
+          rsync -a library "$src/"
+          rsync -a src/llvm-project/libunwind "$src/src/llvm-project/"
 
-          LLVM_CONFIG="build/${HOST_TRIPLE}/llvm/bin/llvm-config"
-          if [ ! -x "$LLVM_CONFIG" ]; then
-            echo "::error::Bundled LLVM llvm-config missing at ${LLVM_CONFIG}."
-            exit 1
-          fi
-          if [ -e "build/${HOST_TRIPLE}/ci-llvm" ]; then
-            echo "::error::CI LLVM directory exists despite llvm.download-ci-llvm=false."
-            exit 1
-          fi
-
-          mkdir -p dist/stage1-arm64e-patch
-          rsync -a --delete "$STAGE1/" dist/stage1-arm64e-patch/
-          find dist/stage1-arm64e-patch -name '*.dSYM' -prune -exec rm -rf {} +
-
-          RUST_SRC_DEST="dist/stage1-arm64e-patch/lib/rustlib/src/rust"
-          rm -rf "$RUST_SRC_DEST"
-          mkdir -p "$RUST_SRC_DEST/src/llvm-project"
-          rsync -a --delete library "$RUST_SRC_DEST/"
-          rsync -a --delete src/llvm-project/libunwind "$RUST_SRC_DEST/src/llvm-project/"
-          test -d "$RUST_SRC_DEST/library"
-          test -d "$RUST_SRC_DEST/src/llvm-project/libunwind"
-          du -sh "$RUST_SRC_DEST" | tee "$DIAGNOSTICS_DIR/rust-src-size.txt"
-
-          PREBUILT_STD_TARGETS=(
-            "$HOST_TRIPLE"
-            arm64e-apple-darwin
-            arm64e-apple-ios
-            arm64e-apple-tvos
-            arm64e-apple-visionos
-          )
-
-          "./dist/stage1-arm64e-patch/bin/rustc" --print target-list | tee "$DIAGNOSTICS_DIR/target-list.txt"
-          for target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
-            grep -qx "$target" "$DIAGNOSTICS_DIR/target-list.txt"
+          # Everything below runs the packaged compiler, not the one in `build/`.
+          rustc="$PWD/$dist/bin/rustc"
+          "$rustc" -vV
+          # `--print target-libdir` also fails for a target the compiler does not know.
+          for target in "$HOST_TRIPLE" $ARM64E_TARGETS; do
+            libdir="$("$rustc" --print target-libdir --target "$target")"
+            ls "$libdir"/libstd-*.rlib "$libdir"/libtest-*.rlib
           done
-          for target in "${PREBUILT_STD_TARGETS[@]}"; do
-            LIBDIR="$(./dist/stage1-arm64e-patch/bin/rustc --print target-libdir --target "$target")"
-            test -n "$(find "$LIBDIR" -maxdepth 1 -name 'libstd-*.rlib' -print -quit)"
-            test -n "$(find "$LIBDIR" -maxdepth 1 -name 'libtest-*.rlib' -print -quit)"
+          ls "$("$rustc" --print target-libdir --target "$HOST_TRIPLE")"/libproc_macro-*.rlib
+          test -d "$("$rustc" --print sysroot)/lib/rustlib/src/rust/library"
+
+          work="$RUNNER_TEMP/packaged"
+          mkdir -p "$work"
+          printf 'fn main() {\n    println!("hello");\n}\n' > "$work/hello.rs"
+          for target in "$HOST_TRIPLE" arm64e-apple-darwin; do
+            "$rustc" -O --target "$target" "$work/hello.rs" -o "$work/hello-$target"
+            test "$("$work/hello-$target")" = hello
           done
-          HOST_LIBDIR="$(./dist/stage1-arm64e-patch/bin/rustc --print target-libdir --target "$HOST_TRIPLE")"
-          test -n "$(find "$HOST_LIBDIR" -maxdepth 1 -name 'libproc_macro-*.rlib' -print -quit)"
-          test -d "$(./dist/stage1-arm64e-patch/bin/rustc --print sysroot)/lib/rustlib/src/rust/library"
-          PACKAGED_LLC="$(dirname "$HOST_LIBDIR")/bin/llc"
-          if [ ! -x "$PACKAGED_LLC" ]; then
-            echo "::error::Packaged llc missing at ${PACKAGED_LLC}."
-            exit 1
-          fi
+          printf '#[test]\nfn adds() {\n    assert_eq!(std::hint::black_box(2) + 2, 4);\n}\n' \
+            > "$work/harness.rs"
+          "$rustc" -O --test --target arm64e-apple-darwin "$work/harness.rs" -o "$work/harness"
+          "$work/harness" | tee "$work/harness.txt"
+          grep -q '^test result: ok\. 1 passed' "$work/harness.txt"
 
-          cat > "$DIAGNOSTICS_DIR/hello.rs" <<'EOF'
-          fn main() {
-              println!("hello-stage1-arm64e");
-          }
-          EOF
+          bsdtar -cf - -C dist stage1-arm64e-patch | zstd -T0 -19 -o "$ASSET"
+          ls -l "$ASSET"
+          echo "rustc_version=$("$rustc" -V)" >> "$GITHUB_OUTPUT"
 
-          "./dist/stage1-arm64e-patch/bin/rustc" \
-            "$DIAGNOSTICS_DIR/hello.rs" \
-            --target "$HOST_TRIPLE" \
-            -O \
-            -o "$DIAGNOSTICS_DIR/hello-host"
-          /usr/bin/file "$DIAGNOSTICS_DIR/hello-host" | tee "$DIAGNOSTICS_DIR/hello-host-file.txt"
-          "$DIAGNOSTICS_DIR/hello-host" | tee "$DIAGNOSTICS_DIR/hello-host-run.txt"
-
-          "./dist/stage1-arm64e-patch/bin/rustc" \
-            "$DIAGNOSTICS_DIR/hello.rs" \
-            --target arm64e-apple-darwin \
-            -O \
-            -o "$DIAGNOSTICS_DIR/hello-arm64e"
-          /usr/bin/file "$DIAGNOSTICS_DIR/hello-arm64e" | tee "$DIAGNOSTICS_DIR/hello-arm64e-file.txt"
-          "$DIAGNOSTICS_DIR/hello-arm64e" | tee "$DIAGNOSTICS_DIR/hello-arm64e-run.txt"
-
-          cat > "$DIAGNOSTICS_DIR/harness.rs" <<'EOF'
-          #[test]
-          fn adds() {
-              assert_eq!(std::hint::black_box(2) + 2, 4);
-          }
-          EOF
-          "./dist/stage1-arm64e-patch/bin/rustc" \
-            "$DIAGNOSTICS_DIR/harness.rs" \
-            --test \
-            --target arm64e-apple-darwin \
-            -O \
-            -o "$DIAGNOSTICS_DIR/harness-arm64e"
-          "$DIAGNOSTICS_DIR/harness-arm64e" | tee "$DIAGNOSTICS_DIR/harness-arm64e-run.txt"
-          grep -q '^test result: ok\. 1 passed' "$DIAGNOSTICS_DIR/harness-arm64e-run.txt"
-
-          SMOKE_ROOT="$DIAGNOSTICS_DIR/generic-array-smoke"
-          STAGE1_RUSTC="$PWD/dist/stage1-arm64e-patch/bin/rustc"
-          rm -rf "$SMOKE_ROOT"
-          mkdir -p "$SMOKE_ROOT/src"
-          cat > "$SMOKE_ROOT/Cargo.toml" <<'EOF'
-          [package]
-          name = "generic-array-arm64e-smoke"
-          version = "0.0.0"
-          edition = "2021"
-
-          [dependencies]
-          generic-array = "=1.4.1"
-          rustversion = "=1.0.22"
-          EOF
-          cat > "$SMOKE_ROOT/src/main.rs" <<'EOF'
-          use generic_array::{typenum::U16, GenericArray};
-
-          fn main() {
-              let mut bytes = GenericArray::<u8, U16>::default();
-              bytes[0] = 42;
-              println!("{}", bytes[0]);
-          }
-          EOF
-          rustup toolchain install stable --profile minimal
-          cargo +stable generate-lockfile --manifest-path "$SMOKE_ROOT/Cargo.toml"
-          for smoke_target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
-            echo "=== generic-array smoke: ${smoke_target} ==="
-            env \
-              CARGO_TARGET_DIR="$SMOKE_ROOT/target-${smoke_target}" \
-              RUSTC="$STAGE1_RUSTC" \
-              cargo +stable build --locked \
-                --target "$smoke_target" \
-                --manifest-path "$SMOKE_ROOT/Cargo.toml" \
-              2>&1 | tee "$DIAGNOSTICS_DIR/generic-array-smoke-${smoke_target}.log"
-          done
-
-          STAGE1_RUSTC_VERBOSE="$(./dist/stage1-arm64e-patch/bin/rustc -vV)"
-          PACKAGED_LLC_VERBOSE="$($PACKAGED_LLC --version)"
-          LLVM_CONFIG_VERSION_RAW="$($LLVM_CONFIG --version)"
-          RUSTC_HOST="$(printf '%s\n' "$STAGE1_RUSTC_VERBOSE" | sed -n 's/^host: //p')"
-          RUSTC_LLVM_VERSION="$(printf '%s\n' "$STAGE1_RUSTC_VERBOSE" | sed -n 's/^LLVM version: //p')"
-          LLC_LLVM_VERSION="$(printf '%s\n' "$PACKAGED_LLC_VERBOSE" | sed -nE 's/^.*LLVM version ([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p')"
-          LLVM_CONFIG_VERSION="$(printf '%s\n' "$LLVM_CONFIG_VERSION_RAW" | sed -nE 's/^([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p')"
-
-          if [ "$RUSTC_HOST" != "$HOST_TRIPLE" ]; then
-            echo "::error::Packaged rustc host identity does not match ${HOST_TRIPLE}."
-            exit 1
-          fi
-          for reported_version in \
-            "$RUSTC_LLVM_VERSION" \
-            "$LLC_LLVM_VERSION" \
-            "$LLVM_CONFIG_VERSION"; do
-            if [ "$reported_version" != "$LLVM_SOURCE_VERSION" ]; then
-              echo "::error::Built LLVM identity ${reported_version:-<missing>} does not match source version ${LLVM_SOURCE_VERSION}."
-              exit 1
-            fi
-          done
-
-          printf '%s\n' "$STAGE1_RUSTC_VERBOSE" | tee "$DIAGNOSTICS_DIR/stage1-rustc-vv.txt"
-          printf '%s\n' "$PACKAGED_LLC_VERBOSE" | tee "$DIAGNOSTICS_DIR/packaged-llc-version.txt"
-          printf '%s\n' "$LLVM_CONFIG_VERSION_RAW" | tee "$DIAGNOSTICS_DIR/bundled-llvm-config-version.txt"
-
-          LLVM_IDENTITY_RELATIVE_PATH="lib/rustlib/arm64e-stage1-llvm-provenance.json"
-          LLVM_IDENTITY_PATH="dist/stage1-arm64e-patch/${LLVM_IDENTITY_RELATIVE_PATH}"
-          export HOST_TRIPLE LLVM_GITLINK_COMMIT LLVM_CHECKED_OUT_COMMIT LLVM_SOURCE_VERSION
-          export LLVM_CONFIG_VERSION_RAW RUSTC_LLVM_VERSION LLC_LLVM_VERSION
-          export STAGE1_RUSTC_VERBOSE PACKAGED_LLC_VERBOSE
-          export LLVM_IDENTITY_PATH
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          identity = {
-              "schemaVersion": 1,
-              "sourceKind": "bundled-gitlink",
-              "downloadCiLlvm": False,
-              "gitlinkCommit": os.environ["LLVM_GITLINK_COMMIT"],
-              "checkedOutCommit": os.environ["LLVM_CHECKED_OUT_COMMIT"],
-              "sourceVersion": os.environ["LLVM_SOURCE_VERSION"],
-              "llvmConfigVersion": os.environ["LLVM_CONFIG_VERSION_RAW"],
-              "hostTriple": os.environ["HOST_TRIPLE"],
-              "tools": {
-                  "rustc": {
-                      "llvmVersion": os.environ["RUSTC_LLVM_VERSION"],
-                      "versionVerbose": os.environ["STAGE1_RUSTC_VERBOSE"],
-                  },
-                  "llc": {
-                      "llvmVersion": os.environ["LLC_LLVM_VERSION"],
-                      "versionVerbose": os.environ["PACKAGED_LLC_VERBOSE"],
-                  },
-              },
-          }
-          identity_path = Path(os.environ["LLVM_IDENTITY_PATH"])
-          identity_path.parent.mkdir(parents=True, exist_ok=True)
-          identity_path.write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n")
-          PY
-
-          bsdtar -cf - -C dist stage1-arm64e-patch | zstd -T0 -19 -o "${ASSET_BASE}.tar.zst"
-          shasum -a 256 "${ASSET_BASE}.tar.zst" > "${ASSET_BASE}.sha256"
-          bsdtar -xOf "${ASSET_BASE}.tar.zst" \
-            "stage1-arm64e-patch/${LLVM_IDENTITY_RELATIVE_PATH}" | cmp - "$LLVM_IDENTITY_PATH"
-
-          XCODE_VERSION="$(xcodebuild -version | tr '\n' ' ' | sed 's/  */ /g; s/ $//')"
-          BUILT_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          TOOLCHAIN_SIZE_BYTES="$(stat -f%z "${ASSET_BASE}.tar.zst")"
-          export STAGE1_RUSTC_VERBOSE PACKAGED_LLC_VERBOSE
-          export LLVM_IDENTITY_RELATIVE_PATH
-
-          python3 - <<PY
-          import json
-          import os
-          from pathlib import Path
-
-          payload = {
-              "schemaVersion": 3,
-              "releaseTag": "${RELEASE_TAG}",
-              "releaseURL": "${RELEASE_URL}",
-              "sourceRepository": "${GITHUB_REPOSITORY}",
-              "sourceRef": "${SOURCE_REF}",
-              "sourceCommit": "${CHECKED_OUT_COMMIT}",
-              "checkedOutCommit": "$(git rev-parse HEAD)",
-              "stableBaseRelease": "${STABLE_BASE_RELEASE}",
-              "stableBaseCommit": "${STABLE_BASE_COMMIT}",
-              "requiresBuildStd": False,
-              "hostTriple": "${HOST_TRIPLE}",
-              "includedHostStdTarget": "${HOST_TRIPLE}",
-              "includedRustSrc": True,
-              "targetTriple": "arm64e-apple-darwin",
-              "builtAt": "${BUILT_AT}",
-              "workflowURL": "${WORKFLOW_URL}",
-              "xcodeVersion": "${XCODE_VERSION}",
-              "stage1RustcVersionVerbose": os.environ["STAGE1_RUSTC_VERBOSE"],
-              "packagedLlcVersionVerbose": os.environ["PACKAGED_LLC_VERBOSE"],
-              "llvmProvenance": {
-                  "sourceKind": "bundled-gitlink",
-                  "downloadCiLlvm": False,
-                  "gitlinkCommit": os.environ["LLVM_GITLINK_COMMIT"],
-                  "checkedOutCommit": os.environ["LLVM_CHECKED_OUT_COMMIT"],
-                  "sourceVersion": os.environ["LLVM_SOURCE_VERSION"],
-                  "llvmConfigVersion": os.environ["LLVM_CONFIG_VERSION_RAW"],
-                  "rustcReportedVersion": os.environ["RUSTC_LLVM_VERSION"],
-                  "llcReportedVersion": os.environ["LLC_LLVM_VERSION"],
-                  "packagedIdentityFile": os.environ["LLVM_IDENTITY_RELATIVE_PATH"],
-              },
-              "asset": {
-                  "purpose": "rust-stage1-for-arm64e",
-                  "fileName": "${ASSET_BASE}.tar.zst",
-                  "sha256FileName": "${ASSET_BASE}.sha256",
-                  "sizeBytes": int("${TOOLCHAIN_SIZE_BYTES}"),
-              },
-              "includedPrebuiltStdTargets": [
-                  "${HOST_TRIPLE}",
-                  "arm64e-apple-darwin",
-                  "arm64e-apple-ios",
-                  "arm64e-apple-tvos",
-                  "arm64e-apple-visionos",
-              ],
-              "includedAppleArm64eTargets": [
-                  "arm64e-apple-darwin",
-                  "arm64e-apple-ios",
-                  "arm64e-apple-tvos",
-                  "arm64e-apple-visionos",
-              ],
-          }
-          Path("${ASSET_BASE}.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-          PY
-
-          bsdtar -cf - -C /tmp "arm64e-stage1-diagnostics-${HOST_TRIPLE}" | zstd -T0 -10 -o "$DIAGNOSTICS_ASSET"
-
-      - name: Generate artifact attestation
-        if: env.CREATE_RELEASE == 'true'
+      # Ties the toolchain to this workflow, this run and the commit it built.
+      - name: Attest the toolchain
+        if: inputs.create_release
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: |
-            ${{ env.ASSET_BASE }}.tar.zst
-            ${{ env.ASSET_BASE }}.sha256
-            ${{ env.ASSET_BASE }}.json
-            ${{ env.DIAGNOSTICS_ASSET }}
+          subject-path: ${{ env.ASSET }}
 
-      - name: Upload stage1 artifact bundle
+      - name: Upload the toolchain
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: arm64e-stage1-${{ matrix.expected_host_triple }}
-          path: |
-            ${{ env.ASSET_BASE }}.tar.zst
-            ${{ env.ASSET_BASE }}.sha256
-            ${{ env.ASSET_BASE }}.json
-            ${{ env.DIAGNOSTICS_ASSET }}
+          name: arm64e-stage1-toolchain
+          path: ${{ env.ASSET }}
           retention-days: 7
           if-no-files-found: error
 
-  publish-stage1:
-    if: github.repository == 'cypherair/rust' && needs.resolve-release.outputs.create_release == 'true'
-    needs:
-      - resolve-release
-      - build-stage1
+  publish:
+    if: github.repository == 'cypherair/rust' && inputs.create_release
+    needs: build
     runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
     env:
-      SOURCE_REF: ${{ needs.resolve-release.outputs.source_ref }}
-      # GitHub provenance records the workflow ref in canonical refs/... form.
-      ATTESTATION_SOURCE_REF: ${{ github.ref }}
-      RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
-      RELEASE_TITLE: ${{ needs.resolve-release.outputs.release_title }}
-      WORKFLOW_URL: ${{ needs.resolve-release.outputs.workflow_url }}
-      CHECKED_OUT_COMMIT: ${{ needs.resolve-release.outputs.checked_out_commit }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
-      - name: Checkout source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 2
-          ref: ${{ needs.resolve-release.outputs.source_ref }}
-
-      - name: Download host-specific stage1 artifacts
+      - name: Download the toolchain
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: arm64e-stage1-*
-          path: stage1-artifacts
-          merge-multiple: true
+          name: arm64e-stage1-toolchain
 
-      - name: Verify host artifacts and generate release notes
+      - name: Publish the prerelease
         env:
-          GH_TOKEN: ${{ github.token }}
+          RUSTC_VERSION: ${{ needs.build.outputs.rustc_version }}
         run: |
           set -euo pipefail
+          tag="rust-stage1-arm64e-toolchain-$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA::7}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          cat > notes.md <<EOF
+          ${RUSTC_VERSION}, with std for the Apple arm64e targets, for CypherAir.
 
-          if [ "$(git rev-parse HEAD)" != "$CHECKED_OUT_COMMIT" ]; then
-            echo "::error::Publisher checkout does not match ${CHECKED_OUT_COMMIT}."
-            exit 1
-          fi
-          git submodule update --init --depth=1 src/llvm-project
-          EXPECTED_LLVM_GITLINK_COMMIT="$(git rev-parse HEAD:src/llvm-project)"
-          EXPECTED_LLVM_CHECKED_OUT_COMMIT="$(git -C src/llvm-project rev-parse HEAD)"
-          if [ "$EXPECTED_LLVM_CHECKED_OUT_COMMIT" != "$EXPECTED_LLVM_GITLINK_COMMIT" ]; then
-            echo "::error::Publisher LLVM checkout does not match the Rust gitlink."
-            exit 1
-          fi
-          LLVM_VERSION_FILE="src/llvm-project/cmake/Modules/LLVMVersion.cmake"
-          llvm_version_component() {
-            local component="$1"
-            local value
-            value="$(sed -nE "s/^[[:space:]]*set\\(LLVM_VERSION_${component}[[:space:]]+([0-9]+)\\)[[:space:]]*$/\\1/p" "$LLVM_VERSION_FILE")"
-            if ! [[ "$value" =~ ^[0-9]+$ ]]; then
-              echo "::error::Could not derive unique LLVM ${component} version from ${LLVM_VERSION_FILE}." >&2
-              exit 1
-            fi
-            printf '%s' "$value"
-          }
-          EXPECTED_LLVM_VERSION="$(llvm_version_component MAJOR).$(llvm_version_component MINOR).$(llvm_version_component PATCH)"
+          - Commit: \`${GITHUB_SHA}\`
+          - Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
 
-          cd stage1-artifacts
-          HOST_TRIPLES=(aarch64-apple-darwin)
+          To check that this workflow built the toolchain from that commit:
 
-          {
-            echo "Prerelease Rust stage1 toolchains for CypherAir Apple arm64e validation."
-            echo
-            echo "- Source ref: \`${SOURCE_REF}\`"
-            echo "- Attestation source ref: \`${ATTESTATION_SOURCE_REF}\`"
-            echo "- Commit: \`${CHECKED_OUT_COMMIT}\`"
-            echo "- Stable base: \`${STABLE_BASE_RELEASE}\` / \`${STABLE_BASE_COMMIT}\`"
-            echo "- LLVM: bundled gitlink \`${EXPECTED_LLVM_GITLINK_COMMIT}\` / \`${EXPECTED_LLVM_VERSION}\`"
-            echo "- Requires \`-Zbuild-std\`: \`false\`"
-            echo "- Workflow: [${WORKFLOW_URL}](${WORKFLOW_URL})"
-            echo
-            echo "Assets:"
-            echo
-          } > ../release-notes.md
-
-          for host_triple in "${HOST_TRIPLES[@]}"; do
-            asset="${STAGE1_ASSET_PREFIX}-${host_triple}.tar.zst"
-            sha="${STAGE1_ASSET_PREFIX}-${host_triple}.sha256"
-            manifest="${STAGE1_ASSET_PREFIX}-${host_triple}.json"
-            diagnostics="arm64e-stage1-diagnostics-${host_triple}.tar.zst"
-
-            test -f "$asset"
-            test -f "$sha"
-            test -f "$manifest"
-            test -f "$diagnostics"
-            shasum -a 256 -c "$sha"
-
-            manifest_schema="$(jq -er '.schemaVersion' "$manifest")"
-            manifest_source_commit="$(jq -er '.sourceCommit' "$manifest")"
-            manifest_checked_out_commit="$(jq -er '.checkedOutCommit' "$manifest")"
-            manifest_host="$(jq -r '.hostTriple' "$manifest")"
-            manifest_purpose="$(jq -r '.asset.purpose' "$manifest")"
-            manifest_llvm_source_kind="$(jq -er '.llvmProvenance.sourceKind' "$manifest")"
-            manifest_download_ci_llvm="$(jq -er '.llvmProvenance.downloadCiLlvm | tostring' "$manifest")"
-            manifest_llvm_gitlink="$(jq -er '.llvmProvenance.gitlinkCommit' "$manifest")"
-            manifest_llvm_checkout="$(jq -er '.llvmProvenance.checkedOutCommit' "$manifest")"
-            manifest_llvm_source_version="$(jq -er '.llvmProvenance.sourceVersion' "$manifest")"
-            manifest_llvm_config_version="$(jq -er '.llvmProvenance.llvmConfigVersion' "$manifest")"
-            manifest_llvm_config_numeric="$(printf '%s\n' "$manifest_llvm_config_version" | sed -nE 's/^([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p')"
-            manifest_rustc_llvm_version="$(jq -er '.llvmProvenance.rustcReportedVersion' "$manifest")"
-            manifest_llc_llvm_version="$(jq -er '.llvmProvenance.llcReportedVersion' "$manifest")"
-            manifest_identity_file="$(jq -er '.llvmProvenance.packagedIdentityFile' "$manifest")"
-            rustc_verbose="$(jq -er '.stage1RustcVersionVerbose' "$manifest")"
-            llc_verbose="$(jq -er '.packagedLlcVersionVerbose' "$manifest")"
-            rustc_host="$(printf '%s\n' "$rustc_verbose" | sed -n 's/^host: //p')"
-            rustc_verbose_llvm="$(printf '%s\n' "$rustc_verbose" | sed -n 's/^LLVM version: //p')"
-            llc_verbose_llvm="$(printf '%s\n' "$llc_verbose" | sed -nE 's/^.*LLVM version ([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p')"
-
-            if [ "$manifest_schema" != "3" ]; then
-              echo "::error::${manifest} schemaVersion must be 3, got ${manifest_schema}"
-              exit 1
-            fi
-            if [ "$manifest_source_commit" != "$CHECKED_OUT_COMMIT" ] || \
-               [ "$manifest_checked_out_commit" != "$CHECKED_OUT_COMMIT" ]; then
-              echo "::error::${manifest} source commits must both be ${CHECKED_OUT_COMMIT}"
-              exit 1
-            fi
-            if [ "$manifest_host" != "$host_triple" ]; then
-              echo "::error::${manifest} hostTriple must be ${host_triple}, got ${manifest_host}"
-              exit 1
-            fi
-            if [ "$manifest_purpose" != "rust-stage1-for-arm64e" ]; then
-              echo "::error::${manifest} asset purpose must be rust-stage1-for-arm64e, got ${manifest_purpose}"
-              exit 1
-            fi
-            if [ "$rustc_host" != "$host_triple" ]; then
-              echo "::error::${manifest} packaged rustc host identity does not match ${host_triple}"
-              exit 1
-            fi
-            if [ "$manifest_llvm_source_kind" != "bundled-gitlink" ] || [ "$manifest_download_ci_llvm" != "false" ]; then
-              echo "::error::${manifest} must identify a bundled, non-CI LLVM build"
-              exit 1
-            fi
-            if [ "$manifest_llvm_gitlink" != "$EXPECTED_LLVM_GITLINK_COMMIT" ] || \
-               [ "$manifest_llvm_checkout" != "$EXPECTED_LLVM_GITLINK_COMMIT" ]; then
-              echo "::error::${manifest} LLVM commit does not match expected gitlink ${EXPECTED_LLVM_GITLINK_COMMIT}"
-              exit 1
-            fi
-            for manifest_version in \
-              "$manifest_llvm_source_version" \
-              "$manifest_llvm_config_numeric" \
-              "$manifest_rustc_llvm_version" \
-              "$manifest_llc_llvm_version" \
-              "$rustc_verbose_llvm" \
-              "$llc_verbose_llvm"; do
-              if [ "$manifest_version" != "$EXPECTED_LLVM_VERSION" ]; then
-                echo "::error::${manifest} LLVM version ${manifest_version:-<missing>} does not match ${EXPECTED_LLVM_VERSION}"
-                exit 1
-              fi
-            done
-            if [ "$manifest_identity_file" != "lib/rustlib/arm64e-stage1-llvm-provenance.json" ]; then
-              echo "::error::${manifest} has unexpected packaged LLVM identity path ${manifest_identity_file}"
-              exit 1
-            fi
-            identity="${manifest%.json}-llvm-provenance.json"
-            tar --zstd -xOf "$asset" \
-              "stage1-arm64e-patch/${manifest_identity_file}" > "$identity"
-            jq -e \
-              --arg host "$host_triple" \
-              --arg commit "$EXPECTED_LLVM_GITLINK_COMMIT" \
-              --arg version "$EXPECTED_LLVM_VERSION" \
-              --arg llvm_config "$manifest_llvm_config_version" \
-              --arg rustc_verbose "$rustc_verbose" \
-              --arg llc_verbose "$llc_verbose" \
-              '.schemaVersion == 1
-               and .sourceKind == "bundled-gitlink"
-               and .downloadCiLlvm == false
-               and .gitlinkCommit == $commit
-               and .checkedOutCommit == $commit
-               and .sourceVersion == $version
-               and .llvmConfigVersion == $llvm_config
-               and .hostTriple == $host
-               and .tools.rustc.llvmVersion == $version
-               and .tools.rustc.versionVerbose == $rustc_verbose
-               and .tools.llc.llvmVersion == $version
-               and .tools.llc.versionVerbose == $llc_verbose' \
-              "$identity" >/dev/null
-            for target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
-              jq -e --arg target "$target" '.includedAppleArm64eTargets | index($target)' "$manifest" >/dev/null
-              jq -e --arg target "$target" '.includedPrebuiltStdTargets | index($target)' "$manifest" >/dev/null
-            done
-            for attested in "$asset" "$sha" "$manifest" "$diagnostics"; do
-              gh attestation verify "$attested" \
-                -R "$GITHUB_REPOSITORY" \
-                --source-ref "$ATTESTATION_SOURCE_REF" \
-                --source-digest "$CHECKED_OUT_COMMIT"
-            done
-
-            {
-              echo "- \`${asset}\`"
-              echo "- \`${sha}\`"
-              echo "- \`${manifest}\`"
-              echo "- \`${diagnostics}\`"
-            } >> ../release-notes.md
-          done
-
-          {
-            echo
-            echo "Verification:"
-            echo
-            echo '```bash'
-            for host_triple in "${HOST_TRIPLES[@]}"; do
-              asset="${STAGE1_ASSET_PREFIX}-${host_triple}.tar.zst"
-              sha="${STAGE1_ASSET_PREFIX}-${host_triple}.sha256"
-              echo "shasum -a 256 -c ${sha}"
-              echo "gh release verify-asset \"$RELEASE_TAG\" ${asset} -R \"$GITHUB_REPOSITORY\""
-              echo "gh attestation verify ${asset} -R \"$GITHUB_REPOSITORY\" --source-ref \"$ATTESTATION_SOURCE_REF\" --source-digest \"$CHECKED_OUT_COMMIT\""
-            done
-            echo '```'
-          } >> ../release-notes.md
-
-      - name: Create release tag
-        run: |
-          set -euo pipefail
-          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "::error::Release tag already exists: $RELEASE_TAG"
-            exit 1
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "$RELEASE_TAG" "$CHECKED_OUT_COMMIT"
-          git push origin "refs/tags/$RELEASE_TAG"
-
-      - name: Create draft prerelease
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$RELEASE_TAG" \
-            --verify-tag \
-            --target "$CHECKED_OUT_COMMIT" \
-            --title "$RELEASE_TITLE" \
-            --notes-file release-notes.md \
+          \`\`\`bash
+          gh attestation verify ${ASSET} -R ${GITHUB_REPOSITORY} --source-ref ${GITHUB_REF} --source-digest ${GITHUB_SHA}
+          \`\`\`
+          EOF
+          gh release create "$tag" "$ASSET" \
+            --target "$GITHUB_SHA" \
+            --title "Rust arm64e stage1 toolchain ($tag)" \
+            --notes-file notes.md \
             --prerelease \
-            --latest=false \
-            --draft
+            --latest=false
 
-      - name: Upload prerelease assets
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Remove a half-made release
+        if: failure()
         run: |
-          set -euo pipefail
-          cd stage1-artifacts
-          gh release upload "$RELEASE_TAG" \
-            rust-stage1-for-arm64e-aarch64-apple-darwin.tar.zst \
-            rust-stage1-for-arm64e-aarch64-apple-darwin.sha256 \
-            rust-stage1-for-arm64e-aarch64-apple-darwin.json \
-            arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst
-
-      - name: Verify uploaded asset list
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          cd stage1-artifacts
-
-          expected_assets=(
-            rust-stage1-for-arm64e-aarch64-apple-darwin.tar.zst
-            rust-stage1-for-arm64e-aarch64-apple-darwin.sha256
-            rust-stage1-for-arm64e-aarch64-apple-darwin.json
-            arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst
-          )
-          gh release view "$RELEASE_TAG" \
-            -R "$GITHUB_REPOSITORY" \
-            --json assets \
-            --jq '.assets[].name' > uploaded-assets.txt
-          for expected_asset in "${expected_assets[@]}"; do
-            grep -Fx "$expected_asset" uploaded-assets.txt >/dev/null
-          done
-
-      - name: Publish draft prerelease
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
-
-      - name: Verify published release asset attestations
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          cd stage1-artifacts
-
-          release_assets=(
-            rust-stage1-for-arm64e-aarch64-apple-darwin.tar.zst
-            rust-stage1-for-arm64e-aarch64-apple-darwin.sha256
-            rust-stage1-for-arm64e-aarch64-apple-darwin.json
-            arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst
-          )
-
-          for attempt in {1..12}; do
-            all_verified=1
-            for release_asset in "${release_assets[@]}"; do
-              if ! gh release verify-asset "$RELEASE_TAG" "$release_asset" -R "$GITHUB_REPOSITORY"; then
-                all_verified=0
-                break
-              fi
-            done
-            if [ "$all_verified" -eq 1 ]; then
-              exit 0
-            fi
-            sleep 10
-          done
-
-          echo "::error::Published release asset attestations were not available for ${RELEASE_TAG}."
-          exit 1
-
-      - name: Cleanup failed draft release/tag
-        if: ${{ failure() }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set +e
-          if [ -z "${RELEASE_TAG:-}" ]; then
-            exit 0
+          if [ -n "${TAG:-}" ]; then
+            gh release delete "$TAG" --cleanup-tag --yes || true
           fi
-          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release delete "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --cleanup-tag --yes
-            exit 0
-          fi
-          git push origin ":refs/tags/$RELEASE_TAG" 2>/dev/null || true
