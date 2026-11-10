@@ -39,7 +39,7 @@ jobs:
         shell: bash
     steps:
       - name: Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
           submodules: recursive
@@ -126,8 +126,19 @@ jobs:
       - name: Build stage1 arm64e std toolchain
         id: build_stage1
         if: ${{ !cancelled() && steps.check_codegen.outcome == 'success' }}
+        # Verify the LLVM IR of the arm64e std. This reaches only what the stage1 compiler builds;
+        # `rust.verify-llvm-ir` would be compiled into rustc and rebuild it.
+        env:
+          RUSTFLAGS_NOT_BOOTSTRAP: -Zverify-llvm-ir
         run: |
-          python3 x.py build compiler/rustc library/std --stage 1 --target arm64e-apple-darwin
+          python3 x.py build library/std --stage 1 --target arm64e-apple-darwin
+
+      - name: Check the arm64e std objects
+        id: std_objects
+        if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
+        run: |
+          python3 -I .github/arm64e/check_objects.py "build/${HOST_TRIPLE}/ci-llvm/bin" \
+            build/${HOST_TRIPLE}/stage1/lib/rustlib/arm64e-apple-darwin/lib/*.rlib
 
       - name: Prepare arm64e smoke helpers
         if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
@@ -172,6 +183,7 @@ jobs:
           parser.add_argument("--expected-stdout")
           parser.add_argument("--expected-stdout-regex")
           parser.add_argument("--asm-pattern")
+          parser.add_argument("--opt-level", default="2")
           args = parser.parse_args()
 
           output_base = pathlib.Path(args.output_base)
@@ -180,7 +192,7 @@ jobs:
               args.source,
               "--target",
               args.target,
-              "-O",
+              f"-Copt-level={args.opt_level}",
               "--emit",
               args.emit,
               "-o",
@@ -325,7 +337,7 @@ jobs:
           pub extern "C" fn target(x: i32) -> i32 { x + 1 }
 
           fn main() {
-              let f: extern "C" fn(i32) -> i32 = target;
+              let f = std::hint::black_box(target as extern "C" fn(i32) -> i32);
               println!("{}", f(41));
           }
           EOF
@@ -435,16 +447,19 @@ jobs:
           }
           EOF
 
-          python3 /tmp/arm64e_collect_smoke.py \
-            --name scope \
-            --rustc "$STAGE1" \
-            --source /tmp/arm64e-diagnostics/arm64e_scope.rs \
-            --output-base /tmp/arm64e-diagnostics/arm64e_scope \
-            --json-out /tmp/arm64e-diagnostics/arm64e_scope.json \
-            --emit llvm-ir,asm,link \
-            --run-binary \
-            --expected-stdout-regex '^constructor=true area=9 twice=42 signed=(true|false)$' \
-            --asm-pattern 'braaz|blraaz'
+          for opt in 2 0; do
+            python3 /tmp/arm64e_collect_smoke.py \
+              --name "scope_O${opt}" \
+              --rustc "$STAGE1" \
+              --opt-level "$opt" \
+              --source /tmp/arm64e-diagnostics/arm64e_scope.rs \
+              --output-base "/tmp/arm64e-diagnostics/arm64e_scope_O${opt}" \
+              --json-out "/tmp/arm64e-diagnostics/arm64e_scope_O${opt}.json" \
+              --emit llvm-ir,asm,link \
+              --run-binary \
+              --expected-stdout 'constructor=true area=9 twice=42 signed=true' \
+              --asm-pattern 'braaz|blraaz'
+          done
 
       - name: Diagnose arm64e unwind runtime
         id: unwind_diag
@@ -494,19 +509,75 @@ jobs:
           }
           EOF
 
+          for opt in 2 0; do
+            python3 /tmp/arm64e_collect_smoke.py \
+              --name "unwind_O${opt}" \
+              --rustc "$STAGE1" \
+              --opt-level "$opt" \
+              --source /tmp/arm64e-diagnostics/arm64e_unwind.rs \
+              --output-base "/tmp/arm64e-diagnostics/arm64e_unwind_O${opt}" \
+              --json-out "/tmp/arm64e-diagnostics/arm64e_unwind_O${opt}.json" \
+              --emit link \
+              --run-binary \
+              --expected-stdout 'main=true thread=true dyn=true join=true drops=1'
+          done
+
+      # The cases above pass on a machine that runs arm64e with pointer authentication off. This
+      # one does not: a call through the raw, unsigned address of a function must kill the process.
+      - name: Check that the runner enforces pointer authentication
+        id: enforce_diag
+        if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
+        run: |
+          STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
+
+          cat > /tmp/arm64e-diagnostics/arm64e_enforce.rs <<'EOF'
+          use std::hint::black_box;
+          use std::os::unix::process::ExitStatusExt;
+          use std::process::Command;
+
+          #[inline(never)]
+          fn target() -> u32 {
+              7
+          }
+
+          /// Removes the signature from a code pointer.
+          fn strip(signed: usize) -> usize {
+              let mut addr = signed;
+              unsafe { std::arch::asm!("xpaci {0}", inout(reg) addr, options(nomem, nostack)) };
+              addr
+          }
+
+          fn main() {
+              let f = black_box(target as fn() -> u32);
+              let raw = strip(f as usize);
+              if std::env::args().nth(1).as_deref() == Some("raw") {
+                  // A valid address with no signature, called through an authenticated call.
+                  let unsigned: fn() -> u32 = unsafe { std::mem::transmute(raw) };
+                  println!("returned {}", black_box(unsigned)());
+                  return;
+              }
+              let status = Command::new(std::env::current_exe().unwrap()).arg("raw").status();
+              let raw_call = match status.unwrap() {
+                  s if s.signal().is_some() => format!("signal {}", s.signal().unwrap()),
+                  s => format!("exit {s}"),
+              };
+              println!("signed={} valid_call={} raw_call={raw_call}", f as usize != raw, f());
+          }
+          EOF
+
           python3 /tmp/arm64e_collect_smoke.py \
-            --name unwind \
+            --name enforce \
             --rustc "$STAGE1" \
-            --source /tmp/arm64e-diagnostics/arm64e_unwind.rs \
-            --output-base /tmp/arm64e-diagnostics/arm64e_unwind \
-            --json-out /tmp/arm64e-diagnostics/arm64e_unwind.json \
+            --source /tmp/arm64e-diagnostics/arm64e_enforce.rs \
+            --output-base /tmp/arm64e-diagnostics/arm64e_enforce \
+            --json-out /tmp/arm64e-diagnostics/arm64e_enforce.json \
             --emit link \
             --run-binary \
-            --expected-stdout 'main=true thread=true dyn=true join=true drops=1'
+            --expected-stdout-regex '^signed=true valid_call=7 raw_call=signal [0-9]+$'
 
       - name: Upload arm64e diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: arm64e-diagnostics-${{ matrix.runner }}
           if-no-files-found: ignore
@@ -525,8 +596,11 @@ jobs:
               ("thread_id", "arm64e_thread_id.json"),
               ("fnptr", "arm64e_fnptr.json"),
               ("tls", "arm64e_tls_smoke.json"),
-              ("scope", "arm64e_scope.json"),
-              ("unwind", "arm64e_unwind.json"),
+              ("scope -O", "arm64e_scope_O2.json"),
+              ("scope -O0", "arm64e_scope_O0.json"),
+              ("unwind -O", "arm64e_unwind_O2.json"),
+              ("unwind -O0", "arm64e_unwind_O0.json"),
+              ("enforce", "arm64e_enforce.json"),
           ]
 
           def sanitize(text):
@@ -543,12 +617,14 @@ jobs:
           print("- targeted_tests: ${{ steps.targeted_tests.outcome }}")
           print("- tidy: ${{ steps.tidy.outcome }}")
           print("- build_stage1: ${{ steps.build_stage1.outcome }}")
+          print("- std_objects: ${{ steps.std_objects.outcome }}")
           print("- hello_diag (non-blocking): ${{ steps.hello_diag.outcome }}")
           print("- thread_id_diag (non-blocking): ${{ steps.thread_id_diag.outcome }}")
           print("- fnptr_diag (non-blocking): ${{ steps.fnptr_diag.outcome }}")
           print("- tls_diag (non-blocking): ${{ steps.tls_diag.outcome }}")
           print("- scope_diag: ${{ steps.scope_diag.outcome }}")
           print("- unwind_diag: ${{ steps.unwind_diag.outcome }}")
+          print("- enforce_diag: ${{ steps.enforce_diag.outcome }}")
           print()
           print("| case | compile | run | rc/signal | file | stdout | asm hits |")
           print("| --- | --- | --- | --- | --- | --- | --- |")
@@ -577,7 +653,7 @@ jobs:
                   f"{file_output} | {stdout} | {asm_hits} |"
               )
           print()
-          print("The hello, thread_id, fnptr and tls cases are non-blocking diagnostics. The scope and unwind cases, the tests, tidy and the stage1 build are blocking.")
+          print("The hello, thread_id, fnptr and tls cases are non-blocking diagnostics. Everything else is blocking.")
           PY
 
           {
