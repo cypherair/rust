@@ -115,7 +115,7 @@ jobs:
       - name: Run tidy
         id: tidy
         run: |
-          python3 x.py test tidy
+          python3 x.py test --stage 1 tidy
 
       - name: Build stage1 arm64e std toolchain
         id: build_stage1
