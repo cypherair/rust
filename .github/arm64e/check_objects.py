@@ -8,6 +8,9 @@ Fails on:
 - in an object, a data relocation that stores a function's address unsigned;
 - in a linked binary, a plain rebase (an unsigned pointer) to an address in `__text`.
 
+Prints, per archive or binary, how many plain `br` it accepted as jump-table dispatches, and the
+instructions around each branch it rejects.
+
 Usage: check_objects.py LLVM_BIN_DIR ARCHIVE...
        check_objects.py LLVM_BIN_DIR --linked BINARY...
 """
@@ -113,14 +116,23 @@ def is_jump_table_dispatch(insns, i):
     return anchored and loaded
 
 
+def context(lines, i):
+    """The instructions around `lines[i]`, which is marked."""
+    around = range(max(0, i - 12), min(len(lines), i + 3))
+    return "".join(f"\n    {'>' if j == i else ' '} {lines[j]}" for j in around)
+
+
 def check_code(objdump, obj, problems):
+    """Returns the number of functions, and of plain `br` accepted as jump-table dispatches."""
     functions = []
     for line in run(objdump, "-d", "--no-show-raw-insn", obj).splitlines():
         if m := FUNCTION_HEADER.match(line):
-            functions.append((m.group(1), []))
+            functions.append((m.group(1), [], []))
         elif (m := INSTRUCTION.match(line)) and functions:
             functions[-1][1].append((m.group(1), m.group(2)))
-    for name, insns in functions:
+            functions[-1][2].append(" ".join(line.split()))
+    jump_tables = 0
+    for name, insns, lines in functions:
         mnemonics = [m for m, _ in insns]
         # The registers stored, not the address: `stp x29, x30, [sp, #-0x10]!`.
         stored = [ops.split("[")[0] for m, ops in insns if m in ("stp", "str", "stur")]
@@ -130,10 +142,16 @@ def check_code(objdump, obj, problems):
             problems.append(f"{obj.name}: {name} saves x30 without pacibsp")
         for i, (m, ops) in enumerate(insns):
             if m == "blr":
-                problems.append(f"{obj.name}: {name} calls through a plain blr {ops}")
-            elif m == "br" and not is_jump_table_dispatch(insns, i):
-                problems.append(f"{obj.name}: {name} branches through a plain br {ops}")
-    return len(functions)
+                problems.append(
+                    f"{obj.name}: {name} calls through a plain blr {ops}{context(lines, i)}"
+                )
+            elif m == "br" and is_jump_table_dispatch(insns, i):
+                jump_tables += 1
+            elif m == "br":
+                problems.append(
+                    f"{obj.name}: {name} branches through a plain br {ops}{context(lines, i)}"
+                )
+    return len(functions), jump_tables
 
 
 def check_data(objdump, obj, functions, problems):
@@ -166,7 +184,8 @@ def text_range(objdump, binary):
 
 def check_linked(objdump, binary, problems):
     """Checks a linked binary's code, and dyld's fixups for unsigned pointers to its code."""
-    n_functions = check_code(objdump, binary, problems)
+    n_functions, jump_tables = check_code(objdump, binary, problems)
+    print(f"{binary}: {n_functions} functions, {jump_tables} jump-table branches")
     start, end = text_range(objdump, binary)
     authenticated = 0
     for line in run("dyld_info", "-fixups", binary).splitlines():
@@ -208,14 +227,21 @@ def main():
         sys.exit("no archives given")
     problems = []
     with tempfile.TemporaryDirectory() as tmp:
-        objects = []
+        members = []
         for archive in archives:
             out = pathlib.Path(tmp) / archive.stem
             out.mkdir()
             run(ar, "x", f"--output={out}", archive)
-            objects += sorted(out.glob("*.o"))
+            members.append((archive, sorted(out.glob("*.o"))))
+        objects = [obj for _, objs in members for obj in objs]
         functions = set().union(*(function_symbols(objdump, o) for o in objects))
-        n_functions = sum(check_code(objdump, o, problems) for o in objects)
+        n_functions = 0
+        for archive, objs in members:
+            counts = [check_code(objdump, o, problems) for o in objs]
+            archive_functions = sum(c[0] for c in counts)
+            print(f"{archive.name}: {len(objs)} objects, {archive_functions} functions, "
+                  f"{sum(c[1] for c in counts)} jump-table branches")
+            n_functions += archive_functions
         n_auth = sum(check_data(objdump, o, functions, problems) for o in objects)
     print(f"{len(archives)} archives, {len(objects)} objects, {n_functions} functions, "
           f"{n_auth} authenticated pointers in data, {len(problems)} problems")
