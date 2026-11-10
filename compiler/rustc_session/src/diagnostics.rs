@@ -400,6 +400,14 @@ pub(crate) struct PointerAuthenticationNotSupportedForTarget<'a> {
 
 #[derive(Diagnostic)]
 #[diag(
+    "`-Z pointer-authentication` cannot change pointer authentication for target {$target_triple}, whose ABI fixes it"
+)]
+pub(crate) struct PointerAuthenticationFixedByTarget<'a> {
+    pub(crate) target_triple: &'a TargetTuple,
+}
+
+#[derive(Diagnostic)]
+#[diag(
     "`-Z small-data-threshold` is not supported for target {$target_triple} and will be ignored"
 )]
 pub(crate) struct SmallDataThresholdNotSupportedForTarget<'a> {
@@ -409,6 +417,12 @@ pub(crate) struct SmallDataThresholdNotSupportedForTarget<'a> {
 #[derive(Diagnostic)]
 #[diag("`-Zbranch-protection` is only supported on aarch64")]
 pub(crate) struct BranchProtectionRequiresAArch64;
+
+#[derive(Diagnostic)]
+#[diag(
+    "`-Zbranch-protection` cannot use `pac-ret` on arm64e Apple targets, which already sign return addresses"
+)]
+pub(crate) struct BranchProtectionPacRetOnArm64eApple;
 
 #[derive(Diagnostic)]
 #[diag("`-Csplit-debuginfo={$debuginfo}` is unstable on this platform")]

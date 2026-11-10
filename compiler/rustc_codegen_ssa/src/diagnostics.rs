@@ -1199,6 +1199,14 @@ pub(crate) struct Aarch64SoftfloatNeon;
 pub(crate) struct X86SoftfloatSse;
 
 #[derive(Diagnostic)]
+#[diag(
+    "`-Ctarget-feature` cannot disable `{$feature}` on arm64e Apple targets, whose ABI requires pointer authentication"
+)]
+pub(crate) struct Arm64eApplePtrauthDisableForbidden<'a> {
+    pub feature: &'a str,
+}
+
+#[derive(Diagnostic)]
 #[diag("ignoring feature with missing prefix in `-Ctarget-feature`: `{$feature}`")]
 #[note("features must begin with a `+` to enable or `-` to disable it")]
 pub(crate) struct UnknownCTargetFeaturePrefix<'a> {

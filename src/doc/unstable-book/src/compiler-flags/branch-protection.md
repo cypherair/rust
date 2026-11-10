@@ -19,6 +19,10 @@ It takes some combination of the following values, separated by a `,`.
 For example, `-Z branch-protection=bti,pac-ret,leaf` is valid, but
 `-Z branch-protection=bti,leaf,pac-ret` is not.
 
-Rust's standard library does not ship with BTI or pointer authentication enabled by default.
+arm64e Apple targets already sign return addresses as part of their ABI, so they reject `pac-ret`.
+They accept `bti` and `gcs`.
+
+Outside arm64e Apple targets, Rust's standard library does not ship with BTI or pointer
+authentication enabled by default.
 In Cargo projects the standard library can be recompiled with pointer authentication using the nightly
 [build-std](../../cargo/reference/unstable.html#build-std) feature.

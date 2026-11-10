@@ -1,0 +1,4 @@
+error: `-Zbranch-protection` cannot use `pac-ret` on arm64e Apple targets, which already sign return addresses
+
+error: aborting due to 1 previous error
+

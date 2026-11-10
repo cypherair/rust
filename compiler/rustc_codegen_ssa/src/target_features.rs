@@ -268,6 +268,12 @@ fn parse_rust_feature_list<'a>(
     }
 }
 
+/// Whether disabling `base_feature` would turn pointer authentication off on an arm64e Apple
+/// target. `pauth` is LLVM's name for the pair that Rust calls `paca` and `pacg`.
+fn disables_arm64e_apple_ptrauth(target: &Target, base_feature: &str, enable: bool) -> bool {
+    !enable && target.is_apple_arm64e() && matches!(base_feature, "paca" | "pacg" | "pauth")
+}
+
 /// Utility function for a codegen backend to compute the set of all actually enabled Rust target
 /// features (which will be stored in `sess.internal_target_features`).
 ///
@@ -321,6 +327,12 @@ pub fn internal_target_features<'a, const N: usize>(
             sess.dcx().emit_warn(diagnostics::UnknownCTargetFeaturePrefix { feature });
         },
         |base_feature, new_features, enable| {
+            if disables_arm64e_apple_ptrauth(&sess.target, base_feature, enable) {
+                sess.dcx().emit_err(diagnostics::Arm64eApplePtrauthDisableForbidden {
+                    feature: base_feature,
+                });
+                return;
+            }
             match features_map.get(base_feature) {
                 None => {
                     // This is definitely not a valid Rust feature name. We do not add it to
@@ -487,6 +499,10 @@ pub fn flag_to_backend_features<'a>(
             // Errors are already emitted in `internal_target_features`; avoid duplicates.
         },
         |base_feature, new_features, enable| {
+            // Rejected in `internal_target_features`.
+            if disables_arm64e_apple_ptrauth(&sess.target, base_feature, enable) {
+                return;
+            }
             // Forward unknown features to the backend as that's what we have always done.
             let new_features =
                 new_features.unwrap_or_else(|| FxHashSet::from_iter(std::iter::once(base_feature)));

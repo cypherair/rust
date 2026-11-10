@@ -1,0 +1,6 @@
+error: `-Ctarget-feature` cannot disable `paca` on arm64e Apple targets, whose ABI requires pointer authentication
+
+error: `-Ctarget-feature` cannot disable `pacg` on arm64e Apple targets, whose ABI requires pointer authentication
+
+error: aborting due to 2 previous errors
+

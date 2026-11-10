@@ -1612,7 +1612,11 @@ fn validate_commandline_args_with_session_available(sess: &Session) {
         );
     }
 
-    if sess.target.cfg_abi != CfgAbi::Pauthtest
+    if sess.target.is_apple_arm64e() && !sess.opts.unstable_opts.pointer_authentication.is_empty() {
+        sess.dcx().emit_err(diagnostics::PointerAuthenticationFixedByTarget {
+            target_triple: &sess.opts.target_triple,
+        });
+    } else if sess.target.cfg_abi != CfgAbi::Pauthtest
         && !sess.opts.unstable_opts.pointer_authentication.is_empty()
     {
         sess.dcx().emit_warn(diagnostics::PointerAuthenticationNotSupportedForTarget {
@@ -1779,6 +1783,11 @@ fn validate_commandline_args_with_session_available(sess: &Session) {
 
     if sess.opts.unstable_opts.branch_protection.is_some() && sess.target.arch != Arch::AArch64 {
         sess.dcx().emit_err(diagnostics::BranchProtectionRequiresAArch64);
+    }
+    if sess.target.is_apple_arm64e()
+        && sess.opts.unstable_opts.branch_protection.is_some_and(|bp| bp.pac_ret.is_some())
+    {
+        sess.dcx().emit_err(diagnostics::BranchProtectionPacRetOnArm64eApple);
     }
 
     if let Some(dwarf_version) =
