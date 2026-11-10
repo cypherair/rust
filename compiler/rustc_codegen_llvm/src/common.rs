@@ -36,19 +36,26 @@ pub(crate) fn maybe_sign_fn_ptr<'ll, 'tcx>(
         return llfn;
     }
 
-    if cx.tcx.sess.pointer_authentication_scope() == Some(PointerAuthScope::ExternC) {
-        // Only free functions or methods
-        let def_id = instance.def_id();
-        if !matches!(cx.tcx.def_kind(def_id), DefKind::Fn | DefKind::AssocFn) {
-            return llfn;
-        }
-        // Only C ABI
-        let abi = cx.tcx.fn_sig(def_id).skip_binder().abi();
-        if !matches!(abi, ExternAbi::C { .. } | ExternAbi::System { .. }) {
-            return llfn;
-        }
-        if Some(def_id) == cx.tcx.lang_items().eh_personality() {
-            return llfn;
+    let Some(scope) = cx.tcx.sess.pointer_authentication_scope() else {
+        return llfn;
+    };
+    match scope {
+        // Callers pass a schema only where the address becomes a value: sign every function.
+        PointerAuthScope::AllFunctions => {}
+        PointerAuthScope::ExternC => {
+            // Only free functions or methods
+            let def_id = instance.def_id();
+            if !matches!(cx.tcx.def_kind(def_id), DefKind::Fn | DefKind::AssocFn) {
+                return llfn;
+            }
+            // Only C ABI
+            let abi = cx.tcx.fn_sig(def_id).skip_binder().abi();
+            if !matches!(abi, ExternAbi::C { .. } | ExternAbi::System { .. }) {
+                return llfn;
+            }
+            if Some(def_id) == cx.tcx.lang_items().eh_personality() {
+                return llfn;
+            }
         }
     }
     // Ignore LLVM intrinsics
@@ -402,6 +409,8 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
         })
     }
 
+    // This replaces the trait default in `rustc_codegen_ssa/src/traits/consts.rs` for every
+    // target. Outside `AllFunctions` it must do what the default does.
     fn scalar_to_backend(&self, cv: Scalar, layout: abi::Scalar, llty: &'ll Type) -> &'ll Value {
         // A function address in a constant operand is a value: sign it if every function pointer
         // is signed.

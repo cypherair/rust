@@ -2185,29 +2185,36 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
         if self.sess().pointer_authentication_functions().is_none() {
             return None;
         }
-        let scope = self.sess().pointer_authentication_scope();
-        // When every function pointer is signed and no direct callee is, exactly the indirect
-        // calls authenticate their callee, whatever their ABI.
-        if scope == Some(PointerAuthScope::AllFunctions) && !llvm::is_indirect_callee(llfn) {
-            return None;
-        }
-        // Pointer authentication support is currently limited to extern "C" calls; filter out other
-        // ABIs.
-        if scope == Some(PointerAuthScope::ExternC) && fn_abi?.conv != CanonAbi::C {
-            return None;
-        }
-        // Filter out LLVM intrinsics.
-        if llvm::get_value_name(llfn).starts_with(b"llvm.") {
-            return None;
+        match self.sess().pointer_authentication_scope()? {
+            // Every function pointer is signed and no direct callee is, so exactly the indirect
+            // calls authenticate their callee, whatever their ABI.
+            PointerAuthScope::AllFunctions => {
+                if !llvm::is_indirect_callee(llfn) {
+                    return None;
+                }
+            }
+            PointerAuthScope::ExternC => {
+                // Pointer authentication support is currently limited to extern "C" calls; filter
+                // out other ABIs.
+                if fn_abi?.conv != CanonAbi::C {
+                    return None;
+                }
+                // Filter out LLVM intrinsics.
+                if llvm::get_value_name(llfn).starts_with(b"llvm.") {
+                    return None;
+                }
+
+                // FIXME(jchlanda) Operand bundles should only be attached to indirect function
+                // calls. However, function pointer signing is currently performed in
+                // `get_fn_addr`, which causes the logic to be applied too broadly, including to
+                // function values (not just pointers). As a result, direct calls using signed
+                // function values must also receive operand bundles.
+                // Once this is resolved, we should analyze each call and skip direct calls. See
+                // the discussion in the rust-lang issue:
+                // <https://github.com/rust-lang/rust/issues/152532>
+            }
         }
 
-        // FIXME(jchlanda) Operand bundles should only be attached to indirect function calls.
-        // However, function pointer signing is currently performed in `get_fn_addr`, which causes
-        // the logic to be applied too broadly, including to function values (not just pointers).
-        // As a result, direct calls using signed function values must also receive operand
-        // bundles.
-        // Once this is resolved, we should analyze each call and skip direct calls. See the
-        // discussion in the rust-lang issue: <https://github.com/rust-lang/rust/issues/152532>
         let key: u32 = 0;
         let discriminator: u64 = 0;
         Some(llvm::OperandBundleBox::new(

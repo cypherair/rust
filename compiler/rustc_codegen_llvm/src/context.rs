@@ -1046,8 +1046,7 @@ impl<'ll, 'tcx> MiscCodegenMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         };
 
         let tcx = self.tcx;
-        // Unwind tables refer to the personality by symbol. Rust code never calls it through a
-        // pointer, so it is treated like a direct callee.
+        // Unwind tables name the personality; it is never a signed value.
         let llfn = match tcx.lang_items().eh_personality() {
             Some(def_id) if name.is_none() => self.get_fn_addr(
                 ty::Instance::expect_resolve(
@@ -1057,7 +1056,7 @@ impl<'ll, 'tcx> MiscCodegenMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                     ty::List::empty(),
                     DUMMY_SP,
                 ),
-                tcx.sess.pointer_authentication_direct_callees(),
+                None,
             ),
             _ => {
                 let name = name.unwrap_or("rust_eh_personality");
