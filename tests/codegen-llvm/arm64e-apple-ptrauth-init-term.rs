@@ -19,8 +19,9 @@
 
 extern crate minicore;
 
+// Different signatures, so that LLVM does not merge the two functions.
 extern "C" fn init_fn() {}
-extern "C" fn term_fn() {}
+extern "C" fn term_fn(_: i32) {}
 
 // CHECK-DAG: @{{.*}}CTOR_CRATE = {{.*}}constant ptr @{{.*}}init_fn{{.*}}, section "__DATA,__mod_init_func,mod_init_funcs"
 #[used]
@@ -40,7 +41,7 @@ static BY_TYPE: extern "C" fn() = init_fn;
 // CHECK-DAG: @{{.*}}TERM = {{.*}}constant ptr @{{.*}}term_fn{{.*}}, section "__DATA,__mod_term_func,mod_term_funcs"
 #[used]
 #[unsafe(link_section = "__DATA,__mod_term_func,mod_term_funcs")]
-static TERM: extern "C" fn() = term_fn;
+static TERM: extern "C" fn(i32) = term_fn;
 
 // CHECK-DAG: @{{.*}}ORDINARY = {{.*}}constant ptr ptrauth (ptr @{{.*}}init_fn{{.*}}, i32 0)
 #[used]

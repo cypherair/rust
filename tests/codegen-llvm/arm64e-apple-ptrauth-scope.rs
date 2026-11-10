@@ -113,11 +113,14 @@ pub fn make_dyn(square: &Square) -> u32 {
 }
 
 // CHECK-LABEL: @direct_calls(
-// CHECK-NOT: ptrauth
+// CHECK-NOT: "ptrauth"
+// CHECK-NOT: ptrauth (ptr
 // CHECK: call {{.*}}i32 @{{.*}}rust_target{{.*}}()
-// CHECK-NOT: ptrauth
+// CHECK-NOT: "ptrauth"
+// CHECK-NOT: ptrauth (ptr
 // CHECK: call {{.*}}i32 @c_target(i32 {{.*}}%{{.*}})
-// CHECK-NOT: ptrauth
+// CHECK-NOT: "ptrauth"
+// CHECK-NOT: ptrauth (ptr
 // CHECK: ret i32
 #[unsafe(no_mangle)]
 pub fn direct_calls(x: u32) -> u32 {

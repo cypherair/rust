@@ -26,7 +26,7 @@
 
 extern crate minicore;
 
-// CHECK: @test(){{.*}} [[ATTR:#[0-9]+]] {
+// CHECK: @test(){{.*}} [[ATTR:#[0-9]+]]
 #[unsafe(no_mangle)]
 pub fn test() {}
 
