@@ -12,7 +12,9 @@ target="${4:-arm64e-apple-darwin}"
 arch="${5:-arm64e}"
 here="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$out"
-export MACOSX_DEPLOYMENT_TARGET=11.0
+# The app's deployment target (`Packages/CypherEngine/Package.swift` in cypherair/cypherair). The
+# linker chooses the fixup format by it.
+export MACOSX_DEPLOYMENT_TARGET=27.2
 
 if ! "$rustc" --edition 2021 --target "$target" --crate-type staticlib -Ccodegen-units=1 \
     -Copt-level="$opt" --print=native-static-libs "$here/lib.rs" -o "$out/libapp_shape.a" \
