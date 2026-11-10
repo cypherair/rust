@@ -51,15 +51,24 @@ jobs:
           fetch-depth: 2
           submodules: recursive
 
-      # Settings for every x.py call below.
+      # On the default `dev` channel, the compiler accepts unstable features in every crate, calls
+      # itself `-dev`, which build scripts take for a nightly, and turns on the next trait solver
+      # and Polonius by default. On `stable`, bootstrap would compile compiler-rt's C into std with
+      # the image's clang; `optimized-compiler-builtins = false` keeps std pure Rust.
       - name: Configure the build
         run: |
           set -euo pipefail
           cat > bootstrap.toml <<'EOF'
           change-id = "ignore"
 
+          [build]
+          optimized-compiler-builtins = false
+
           [llvm]
           download-ci-llvm = false
+
+          [rust]
+          channel = "stable"
           EOF
           sw_vers
           xcodebuild -version
@@ -132,6 +141,10 @@ jobs:
           # Everything below runs the packaged compiler, not the one in `build/`.
           rustc="$PWD/$dist/bin/rustc"
           "$rustc" -vV
+          if ! "$rustc" -vV | grep -Eqx 'release: [0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::The compiler is not on the stable channel."
+            exit 1
+          fi
           # `--print target-libdir` also fails for a target the compiler does not know.
           for target in "$HOST_TRIPLE" $ARM64E_TARGETS; do
             libdir="$("$rustc" --print target-libdir --target "$target")"
