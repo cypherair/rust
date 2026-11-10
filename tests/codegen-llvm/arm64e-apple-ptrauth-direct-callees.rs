@@ -14,7 +14,7 @@
 //@ [VISIONOS] needs-llvm-components: aarch64
 
 #![crate_type = "lib"]
-#![feature(no_core, lang_items, rustc_attrs)]
+#![feature(auto_traits, no_core, lang_items, rustc_attrs)]
 #![no_core]
 
 #[lang = "pointee_sized"]
@@ -31,6 +31,15 @@ pub trait Destruct: PointeeSized {}
 
 #[lang = "copy"]
 pub trait Copy: Sized {}
+
+#[lang = "freeze"]
+pub unsafe auto trait Freeze {}
+
+#[lang = "unsafe_unpin"]
+pub unsafe auto trait UnsafeUnpin {}
+
+#[lang = "unpin"]
+pub auto trait Unpin {}
 
 #[lang = "legacy_receiver"]
 pub trait LegacyReceiver: PointeeSized {}
