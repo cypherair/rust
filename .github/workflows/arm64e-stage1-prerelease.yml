@@ -39,6 +39,9 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
       HOST_TRIPLE: aarch64-apple-darwin
       ARM64E_TARGETS: arm64e-apple-darwin arm64e-apple-ios arm64e-apple-visionos
+      # LLVM and rustc run on macOS 11 and later, as upstream's do, whatever SDK the image has. std
+      # for macOS has the same default.
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
       # Verify the LLVM IR of everything the stage1 compiler builds, std for every target included.
       # `rust.verify-llvm-ir` would be compiled into rustc itself.
       RUSTFLAGS_NOT_BOOTSTRAP: -Zverify-llvm-ir
