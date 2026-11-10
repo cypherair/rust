@@ -131,8 +131,10 @@ jobs:
 
           # Everything below runs the packaged compiler, not the one in `build/`.
           rustc="$PWD/$dist/bin/rustc"
-          "$rustc" -vV
-          if ! "$rustc" -vV | grep -Eqx 'release: [0-9]+\.[0-9]+\.[0-9]+'; then
+          # Read whole: `grep -q` on a pipe would stop reading, and rustc would fail on the rest.
+          version="$("$rustc" -vV)"
+          echo "$version"
+          if ! grep -Eqx 'release: [0-9]+\.[0-9]+\.[0-9]+' <<< "$version"; then
             echo "::error::The compiler is not on the stable channel."
             exit 1
           fi
