@@ -118,7 +118,8 @@ jobs:
         id: tidy
         if: ${{ !cancelled() }}
         run: |
-          python3 x.py test --stage 1 tidy
+          # A stable release pins no stage 0 rustfmt; tidy's format check uses the runner's.
+          python3 x.py test --stage 1 tidy --set build.rustfmt="$(rustup which rustfmt)"
 
       - name: Build stage1 arm64e std toolchain
         id: build_stage1
@@ -422,14 +423,12 @@ jobs:
               let shape = black_box(Box::new(Square(3)) as Box<dyn Shape + Send>);
               let add_one = black_box((|x| x + 1) as fn(u32) -> u32);
               let signed = (add_one as usize) >> 47 != 0;
-              let caught = std::panic::catch_unwind(|| panic!("caught on purpose")).is_err();
               let area = std::thread::spawn(move || shape.area()).join().unwrap();
               println!(
-                  "constructor={} area={} twice={} caught={} signed={}",
+                  "constructor={} area={} twice={} signed={}",
                   CONSTRUCTOR_RAN.load(Ordering::SeqCst),
                   area,
                   twice(add_one, 40),
-                  caught,
                   signed,
               );
           }
@@ -443,8 +442,32 @@ jobs:
             --json-out /tmp/arm64e-diagnostics/arm64e_scope.json \
             --emit llvm-ir,asm,link \
             --run-binary \
-            --expected-stdout-regex '^constructor=true area=9 twice=42 caught=true signed=(true|false)$' \
+            --expected-stdout-regex '^constructor=true area=9 twice=42 signed=(true|false)$' \
             --asm-pattern 'braaz|blraaz'
+
+      - name: Diagnose arm64e unwind runtime
+        id: unwind_diag
+        if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
+
+          cat > /tmp/arm64e-diagnostics/arm64e_unwind.rs <<'EOF'
+          fn main() {
+              let caught = std::panic::catch_unwind(|| panic!("caught on purpose")).is_err();
+              println!("caught={caught}");
+          }
+          EOF
+
+          python3 /tmp/arm64e_collect_smoke.py \
+            --name unwind \
+            --rustc "$STAGE1" \
+            --source /tmp/arm64e-diagnostics/arm64e_unwind.rs \
+            --output-base /tmp/arm64e-diagnostics/arm64e_unwind \
+            --json-out /tmp/arm64e-diagnostics/arm64e_unwind.json \
+            --emit link \
+            --run-binary \
+            --expected-stdout 'caught=true'
 
       - name: Upload arm64e diagnostics
         if: always()
@@ -468,6 +491,7 @@ jobs:
               ("fnptr", "arm64e_fnptr.json"),
               ("tls", "arm64e_tls_smoke.json"),
               ("scope", "arm64e_scope.json"),
+              ("unwind", "arm64e_unwind.json"),
           ]
 
           def sanitize(text):
@@ -489,6 +513,7 @@ jobs:
           print("- fnptr_diag (non-blocking): ${{ steps.fnptr_diag.outcome }}")
           print("- tls_diag (non-blocking): ${{ steps.tls_diag.outcome }}")
           print("- scope_diag (non-blocking): ${{ steps.scope_diag.outcome }}")
+          print("- unwind_diag (non-blocking): ${{ steps.unwind_diag.outcome }}")
           print()
           print("| case | compile | run | rc/signal | file | stdout | asm hits |")
           print("| --- | --- | --- | --- | --- | --- | --- |")
