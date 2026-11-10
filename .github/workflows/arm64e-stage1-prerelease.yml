@@ -153,9 +153,6 @@ jobs:
           - runner_label: xcode-27
             expected_host_triple: aarch64-apple-darwin
             xcode_app: /Applications/Xcode_27.2.app
-          - runner_label: macos-26-intel
-            expected_host_triple: x86_64-apple-darwin
-            xcode_app: /Applications/Xcode_26.5.app
     name: build-stage1 (${{ matrix.expected_host_triple }})
     runs-on: ${{ matrix.runner_label }}
     timeout-minutes: 360
@@ -270,9 +267,8 @@ jobs:
           done
 
       # A Rust static library in a clang-built host, at -O and -O0, and the object check on the
-      # linked hosts. Only an Apple silicon runner can run arm64e.
+      # linked hosts.
       - name: Run the app-shape case and check the linked binaries
-        if: matrix.expected_host_triple == 'aarch64-apple-darwin'
         run: |
           set -euo pipefail
           DIAGNOSTICS_DIR="/tmp/arm64e-stage1-diagnostics-${HOST_TRIPLE}"
@@ -386,11 +382,7 @@ jobs:
             -O \
             -o "$DIAGNOSTICS_DIR/hello-arm64e"
           /usr/bin/file "$DIAGNOSTICS_DIR/hello-arm64e" | tee "$DIAGNOSTICS_DIR/hello-arm64e-file.txt"
-          if [ "$HOST_TRIPLE" = "aarch64-apple-darwin" ]; then
-            "$DIAGNOSTICS_DIR/hello-arm64e" | tee "$DIAGNOSTICS_DIR/hello-arm64e-run.txt"
-          else
-            echo "Skipping arm64e binary execution on ${HOST_TRIPLE}" | tee "$DIAGNOSTICS_DIR/hello-arm64e-run.txt"
-          fi
+          "$DIAGNOSTICS_DIR/hello-arm64e" | tee "$DIAGNOSTICS_DIR/hello-arm64e-run.txt"
 
           cat > "$DIAGNOSTICS_DIR/harness.rs" <<'EOF'
           #[test]
@@ -404,10 +396,8 @@ jobs:
             --target arm64e-apple-darwin \
             -O \
             -o "$DIAGNOSTICS_DIR/harness-arm64e"
-          if [ "$HOST_TRIPLE" = "aarch64-apple-darwin" ]; then
-            "$DIAGNOSTICS_DIR/harness-arm64e" | tee "$DIAGNOSTICS_DIR/harness-arm64e-run.txt"
-            grep -q '^test result: ok\. 1 passed' "$DIAGNOSTICS_DIR/harness-arm64e-run.txt"
-          fi
+          "$DIAGNOSTICS_DIR/harness-arm64e" | tee "$DIAGNOSTICS_DIR/harness-arm64e-run.txt"
+          grep -q '^test result: ok\. 1 passed' "$DIAGNOSTICS_DIR/harness-arm64e-run.txt"
 
           SMOKE_ROOT="$DIAGNOSTICS_DIR/generic-array-smoke"
           STAGE1_RUSTC="$PWD/dist/stage1-arm64e-patch/bin/rustc"
@@ -663,7 +653,7 @@ jobs:
           EXPECTED_LLVM_VERSION="$(llvm_version_component MAJOR).$(llvm_version_component MINOR).$(llvm_version_component PATCH)"
 
           cd stage1-artifacts
-          HOST_TRIPLES=(aarch64-apple-darwin x86_64-apple-darwin)
+          HOST_TRIPLES=(aarch64-apple-darwin)
 
           {
             echo "Prerelease Rust stage1 toolchains for CypherAir Apple arm64e validation."
@@ -851,11 +841,7 @@ jobs:
             rust-stage1-for-arm64e-aarch64-apple-darwin.tar.zst \
             rust-stage1-for-arm64e-aarch64-apple-darwin.sha256 \
             rust-stage1-for-arm64e-aarch64-apple-darwin.json \
-            arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst \
-            rust-stage1-for-arm64e-x86_64-apple-darwin.tar.zst \
-            rust-stage1-for-arm64e-x86_64-apple-darwin.sha256 \
-            rust-stage1-for-arm64e-x86_64-apple-darwin.json \
-            arm64e-stage1-diagnostics-x86_64-apple-darwin.tar.zst
+            arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst
 
       - name: Verify uploaded asset list
         env:
@@ -869,10 +855,6 @@ jobs:
             rust-stage1-for-arm64e-aarch64-apple-darwin.sha256
             rust-stage1-for-arm64e-aarch64-apple-darwin.json
             arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst
-            rust-stage1-for-arm64e-x86_64-apple-darwin.tar.zst
-            rust-stage1-for-arm64e-x86_64-apple-darwin.sha256
-            rust-stage1-for-arm64e-x86_64-apple-darwin.json
-            arm64e-stage1-diagnostics-x86_64-apple-darwin.tar.zst
           )
           gh release view "$RELEASE_TAG" \
             -R "$GITHUB_REPOSITORY" \
@@ -900,10 +882,6 @@ jobs:
             rust-stage1-for-arm64e-aarch64-apple-darwin.sha256
             rust-stage1-for-arm64e-aarch64-apple-darwin.json
             arm64e-stage1-diagnostics-aarch64-apple-darwin.tar.zst
-            rust-stage1-for-arm64e-x86_64-apple-darwin.tar.zst
-            rust-stage1-for-arm64e-x86_64-apple-darwin.sha256
-            rust-stage1-for-arm64e-x86_64-apple-darwin.json
-            arm64e-stage1-diagnostics-x86_64-apple-darwin.tar.zst
           )
 
           for attempt in {1..12}; do
