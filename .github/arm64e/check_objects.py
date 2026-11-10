@@ -28,6 +28,7 @@ UNSIGNED_OK_SECTIONS = {
     "__mod_term_func",
     "__init_offsets",
     "__thread_vars",  # TLV descriptors name `_tlv_bootstrap`; dyld binds them
+    "__got",  # code loads a raw address from the GOT and signs it, as clang does
 }
 
 FUNCTION_HEADER = re.compile(r"^[0-9a-f]+ <(.+)>:$")
