@@ -2129,6 +2129,11 @@ impl Target {
         }
     }
 
+    /// Whether this is an arm64e target on an Apple platform, whose ABI signs code pointers.
+    pub fn is_apple_arm64e(&self) -> bool {
+        self.is_like_darwin && self.llvm_target.starts_with("arm64e")
+    }
+
     /// Is this target single-threaded?
     ///
     /// This affects both optimizations (e.g., atomics can be lowered to regular operations) and

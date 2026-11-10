@@ -1,0 +1,5 @@
+#![feature(allocator_internals, no_core)]
+#![crate_type = "cdylib"]
+#![default_lib_allocator]
+#![needs_allocator]
+#![no_core]

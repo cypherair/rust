@@ -123,7 +123,7 @@ pub struct PointerAuthSchema {
 }
 impl PointerAuthSchema {
     pub fn function_pointers_default(target: &Target) -> Self {
-        assert!(target.cfg_abi == CfgAbi::Pauthtest);
+        assert!(target.cfg_abi == CfgAbi::Pauthtest || target.is_apple_arm64e());
         return Self {
             is_address_discriminated: PointerAuthAddressDiscriminator::HardwareAddress(false),
             discrimination_kind: PointerAuthDiscrimination::None,
@@ -183,6 +183,23 @@ impl PointerAuthConfig {
             vt_ptr_type_discrimination: true,
         };
     }
+    /// The arm64e ABI of Apple's platforms, as clang's Darwin driver sets it up. C function
+    /// pointers use key IA with no diversity.
+    fn arm64e_apple(target: &Target) -> Self {
+        Self {
+            return_addresses: true,
+            auth_traps: true,
+            indirect_gotos: true,
+            elf_got: false,
+            aarch64_jump_table_hardening: false,
+            function_pointers: Some(PointerAuthSchema::function_pointers_default(target)),
+            init_fini: None,
+            intrinsics: true,
+            typeinfo_vt_ptr_discrimination: false,
+            vt_ptr_addr_discrimination: true,
+            vt_ptr_type_discrimination: true,
+        }
+    }
     pub fn calculate_pauth_abi_version(&self, target: &Target) -> u32 {
         assert!(target.cfg_abi == CfgAbi::Pauthtest);
         // Bit positions of version flags for AARCH64_PAUTH_PLATFORM_LLVM_LINUX.
@@ -229,6 +246,10 @@ impl PointerAuthConfig {
         pauth_abi_version
     }
     pub fn from_raw(raw: &[(PointerAuthOption, bool)], target: &Target) -> Option<Self> {
+        // The platform fixes the arm64e ABI, so `-Zpointer-authentication` does not apply.
+        if target.is_apple_arm64e() {
+            return Some(Self::arm64e_apple(target));
+        }
         if target.cfg_abi != CfgAbi::Pauthtest {
             return None;
         }
