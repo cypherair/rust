@@ -111,19 +111,6 @@ jobs:
               "build/$HOST_TRIPLE/stage1/lib/rustlib/$target/lib/"*.rlib
           done
 
-      # A Rust static library in a clang-built host, at -O and -O0, and the object check on the
-      # linked hosts.
-      - name: Run the app-shape case and check the linked binaries
-        timeout-minutes: 15
-        run: |
-          set -euo pipefail
-          for opt in 2 0; do
-            .github/arm64e/app-shape/run.sh "build/$HOST_TRIPLE/stage1/bin/rustc" "$opt" \
-              "$RUNNER_TEMP/app-shape-O$opt"
-          done
-          python3 -I .github/arm64e/check_objects.py "build/$HOST_TRIPLE/llvm/bin" --linked \
-            "$RUNNER_TEMP/app-shape-O2/host" "$RUNNER_TEMP/app-shape-O0/host"
-
       - name: Package the toolchain
         id: package
         run: |
@@ -159,11 +146,6 @@ jobs:
 
           work="$RUNNER_TEMP/packaged"
           mkdir -p "$work"
-          printf 'fn main() {\n    println!("hello");\n}\n' > "$work/hello.rs"
-          for target in "$HOST_TRIPLE" arm64e-apple-darwin; do
-            "$rustc" -O --target "$target" "$work/hello.rs" -o "$work/hello-$target"
-            test "$("$work/hello-$target")" = hello
-          done
           printf '#[test]\nfn adds() {\n    assert_eq!(std::hint::black_box(2) + 2, 4);\n}\n' \
             > "$work/harness.rs"
           "$rustc" -O --test --target arm64e-apple-darwin "$work/harness.rs" -o "$work/harness"
@@ -173,6 +155,19 @@ jobs:
           bsdtar -cf - -C dist stage1-arm64e-patch | zstd -T0 -19 -o "$ASSET"
           ls -l "$ASSET"
           echo "rustc_version=$("$rustc" -V)" >> "$GITHUB_OUTPUT"
+
+      # A Rust static library in a clang-built host, at -O and -O0, built by the packaged compiler,
+      # and the object check on the linked hosts.
+      - name: Run the app-shape case and check the linked binaries
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          for opt in 2 0; do
+            .github/arm64e/app-shape/run.sh dist/stage1-arm64e-patch/bin/rustc "$opt" \
+              "$RUNNER_TEMP/app-shape-O$opt"
+          done
+          python3 -I .github/arm64e/check_objects.py "build/$HOST_TRIPLE/llvm/bin" --linked \
+            "$RUNNER_TEMP/app-shape-O2/host" "$RUNNER_TEMP/app-shape-O0/host"
 
       - name: Upload the toolchain
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
