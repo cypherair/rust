@@ -1,5 +1,9 @@
 name: arm64e Stage1 Prerelease
 
+# Builds the stage1 toolchain with arm64e std, from LLVM's own source, and checks it. Only a manual
+# run with `create_release` publishes a prerelease; every other run, a trial build included, keeps
+# its toolchain as a workflow artifact for seven days.
+
 on:
   workflow_dispatch:
     inputs:
@@ -36,8 +40,8 @@ concurrency:
 env:
   INTEGRATION_BRANCH: rust-stable-with-arm64e
   RELEASE_TAG_PREFIX_DEFAULT: rust-stage1-arm64e-toolchain
-  STABLE_BASE_RELEASE: "1.97.1"
-  STABLE_BASE_COMMIT: 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+  STABLE_BASE_RELEASE: "1.100.0"
+  STABLE_BASE_COMMIT: 0ef1bc386059596dada8fb65b50425aab2ea637a
   STAGE1_ASSET_PREFIX: rust-stage1-for-arm64e
 
 jobs:
@@ -108,7 +112,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
           ref: ${{ steps.resolve.outputs.source_ref }}
@@ -144,10 +148,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner_label: macos-26
+          # GitHub's arm64 `macos-26` image is short of capacity; `xcode-27` gets runners. Its
+          # Xcode is the one the app builds with.
+          - runner_label: xcode-27
             expected_host_triple: aarch64-apple-darwin
+            xcode_app: /Applications/Xcode_27.2.app
           - runner_label: macos-26-intel
             expected_host_triple: x86_64-apple-darwin
+            xcode_app: /Applications/Xcode_26.5.app
     name: build-stage1 (${{ matrix.expected_host_triple }})
     runs-on: ${{ matrix.runner_label }}
     timeout-minutes: 360
@@ -162,40 +170,29 @@ jobs:
       WORKFLOW_URL: ${{ needs.resolve-release.outputs.workflow_url }}
       CHECKED_OUT_COMMIT: ${{ needs.resolve-release.outputs.checked_out_commit }}
       EXPECTED_HOST_TRIPLE: ${{ matrix.expected_host_triple }}
+      # Verify the LLVM IR of everything the stage1 compiler builds, std for every target included.
+      # `rust.verify-llvm-ir` would be compiled into rustc itself.
+      RUSTFLAGS_NOT_BOOTSTRAP: -Zverify-llvm-ir
     steps:
       - name: Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
           ref: ${{ needs.resolve-release.outputs.source_ref }}
           submodules: recursive
 
-      - name: Select Xcode 26.5
+      - name: Select Xcode
+        env:
+          XCODE_APP: ${{ matrix.xcode_app }}
         run: |
           set -euo pipefail
-
-          if [ -n "${XCODE_26_5_DEVELOPER_DIR:-}" ] && [ -d "${XCODE_26_5_DEVELOPER_DIR}" ]; then
-            SELECTED_DEVELOPER_DIR="${XCODE_26_5_DEVELOPER_DIR}"
-          elif [ -d "/Applications/Xcode_26.5.app/Contents/Developer" ]; then
-            SELECTED_DEVELOPER_DIR="/Applications/Xcode_26.5.app/Contents/Developer"
-          elif [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
-            SELECTED_DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
-          else
-            echo "::error::Xcode 26.5 was not found on this runner."
+          if [ ! -d "${XCODE_APP}/Contents/Developer" ]; then
+            echo "::error::${XCODE_APP} is not on this runner."
+            ls -d /Applications/Xcode*.app || true
             exit 1
           fi
-
-          echo "DEVELOPER_DIR=${SELECTED_DEVELOPER_DIR}" >> "$GITHUB_ENV"
-          export DEVELOPER_DIR="${SELECTED_DEVELOPER_DIR}"
-          XCODE_VERSION="$(xcodebuild -version | tr '\n' ' ' | sed 's/  */ /g; s/ $//')"
-          echo "$XCODE_VERSION"
-          case "$XCODE_VERSION" in
-            Xcode\ 26.5*) ;;
-            *)
-              echo "::error::Expected Xcode 26.5, got: ${XCODE_VERSION}"
-              exit 1
-              ;;
-          esac
+          echo "DEVELOPER_DIR=${XCODE_APP}/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="${XCODE_APP}/Contents/Developer" xcodebuild -version
 
       - name: Show runner and source environment
         run: |
@@ -232,18 +229,27 @@ jobs:
             echo "DIAGNOSTICS_ASSET=$DIAGNOSTICS_ASSET"
           } >> "$GITHUB_ENV"
 
-      - name: Run targeted arm64e validation
+      # The validation workflow's test list, here against the LLVM this toolchain is built with.
+      - name: Run the arm64e and pauthtest tests
         run: |
           set -euo pipefail
           python3 x.py --set llvm.download-ci-llvm=false \
             check compiler/rustc_codegen_ssa compiler/rustc_codegen_llvm --stage 1
           python3 x.py --set llvm.download-ci-llvm=false \
-            test --stage 1 --force-rerun \
+            test --stage 1 --force-rerun --no-fail-fast \
             tests/codegen-llvm/arm64e-apple-ptrauth*.rs \
             tests/assembly-llvm/arm64e-apple-ptrauth-calls.rs \
             tests/assembly-llvm/targets/targets-macho.rs \
             tests/ui/compile-flags/invalid/branch-protection-arm64e-apple-pac-ret.rs \
-            tests/ui/compile-flags/invalid/target-feature-arm64e-apple-ptrauth-disable.rs
+            tests/ui/compile-flags/invalid/target-feature-arm64e-apple-ptrauth-disable.rs \
+            tests/run-make/arm64e-ptrauth-allocator-shim \
+            tests/run-make/arm64e-ptrauth-serialized-output \
+            tests/codegen-llvm/pauth \
+            tests/assembly-llvm/pauth-basic.rs \
+            tests/assembly-llvm/targets/targets-elf.rs \
+            tests/ui/pointer_authentication \
+            tests/ui/statics/crt-static-pauthtest.rs \
+            tests/ui/target_modifiers/incompatible_pauth.rs
 
       - name: Build stage1 compiler and Apple std payload
         run: |
@@ -252,6 +258,29 @@ jobs:
           python3 x.py --set llvm.download-ci-llvm=false \
             build compiler/rustc library/std library/proc_macro --stage 1 \
             --target "${HOST_TRIPLE},${ARM64E_TARGETS}"
+
+      - name: Check the arm64e std objects
+        run: |
+          set -euo pipefail
+          for target in arm64e-apple-darwin arm64e-apple-ios arm64e-apple-tvos arm64e-apple-visionos; do
+            echo "=== ${target}"
+            python3 -I .github/arm64e/check_objects.py "build/${HOST_TRIPLE}/llvm/bin" \
+              "build/${HOST_TRIPLE}/stage1/lib/rustlib/${target}/lib/"*.rlib
+          done
+
+      # A Rust static library in a clang-built host, at -O and -O0, and the object check on the
+      # linked hosts. Only an Apple silicon runner can run arm64e.
+      - name: Run the app-shape case and check the linked binaries
+        if: matrix.expected_host_triple == 'aarch64-apple-darwin'
+        run: |
+          set -euo pipefail
+          DIAGNOSTICS_DIR="/tmp/arm64e-stage1-diagnostics-${HOST_TRIPLE}"
+          for opt in 2 0; do
+            .github/arm64e/app-shape/run.sh "build/${HOST_TRIPLE}/stage1/bin/rustc" "$opt" \
+              "${DIAGNOSTICS_DIR}/app-shape-O${opt}"
+          done
+          python3 -I .github/arm64e/check_objects.py "build/${HOST_TRIPLE}/llvm/bin" --linked \
+            "${DIAGNOSTICS_DIR}/app-shape-O2/host" "${DIAGNOSTICS_DIR}/app-shape-O0/host"
 
       - name: Package minimal stage1 toolchain
         run: |
@@ -533,7 +562,7 @@ jobs:
 
       - name: Generate artifact attestation
         if: env.CREATE_RELEASE == 'true'
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             ${{ env.ASSET_BASE }}.tar.zst
@@ -542,7 +571,7 @@ jobs:
             ${{ env.DIAGNOSTICS_ASSET }}
 
       - name: Upload stage1 artifact bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: arm64e-stage1-${{ matrix.expected_host_triple }}
           path: |
@@ -572,13 +601,13 @@ jobs:
       CHECKED_OUT_COMMIT: ${{ needs.resolve-release.outputs.checked_out_commit }}
     steps:
       - name: Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
           ref: ${{ needs.resolve-release.outputs.source_ref }}
 
       - name: Download host-specific stage1 artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: arm64e-stage1-*
           path: stage1-artifacts
