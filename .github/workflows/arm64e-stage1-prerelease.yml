@@ -16,9 +16,10 @@ on:
 permissions:
   contents: read
 
+# A second dispatch on the same ref waits for the first, so it never cuts off a publish.
 concurrency:
   group: arm64e-stage1-prerelease-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   ASSET: rust-stage1-for-arm64e-aarch64-apple-darwin.tar.zst
@@ -233,7 +234,7 @@ jobs:
             --latest=false
 
       - name: Remove a half-made release
-        if: failure()
+        if: failure() || cancelled()
         run: |
           if [ -n "${TAG:-}" ]; then
             gh release delete "$TAG" --cleanup-tag --yes || true
