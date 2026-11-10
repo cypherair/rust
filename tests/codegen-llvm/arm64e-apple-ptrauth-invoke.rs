@@ -1,4 +1,4 @@
-// ignore-tidy-linelength
+// ignore-tidy-file-linelength
 // `__rust_try`, which rustc generates for `catch_unwind`, carries the pointer-authentication
 // attributes, and its calls through the `try_fn` and `catch_fn` pointers authenticate the callee.
 //@ add-minicore

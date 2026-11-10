@@ -1,4 +1,4 @@
-// ignore-tidy-linelength
+// ignore-tidy-file-linelength
 // On arm64e Apple targets the entries of `__mod_init_func` and `__mod_term_func` stay unsigned,
 // whether the section is named or typed, like the constructors clang emits itself. (Clang signs a
 // static that C code places in these sections by hand.) Either form works: Apple's linker turns

@@ -1,4 +1,4 @@
-// ignore-tidy-linelength
+// ignore-tidy-file-linelength
 // Callees that codegen calls directly stay unsigned and carry no `ptrauth` bundle, even
 // unoptimised: drop glue, a lang item (the abort when a `nounwind` function would unwind), and
 // the personality, which unwind tables name. minicore has no `Drop` impl and no personality, so
@@ -26,6 +26,12 @@ pub trait MetaSized: PointeeSized {}
 #[lang = "sized"]
 pub trait Sized: MetaSized {}
 
+#[lang = "destruct"]
+pub trait Destruct: PointeeSized {}
+
+#[lang = "copy"]
+pub trait Copy: Sized {}
+
 #[lang = "legacy_receiver"]
 pub trait LegacyReceiver: PointeeSized {}
 
@@ -45,7 +51,6 @@ fn panic_cannot_unwind() -> ! {
 }
 
 #[lang = "eh_personality"]
-#[unsafe(no_mangle)]
 extern "C" fn rust_eh_personality() {}
 
 pub struct Guard;
@@ -69,7 +74,7 @@ unsafe extern "C-unwind" {
 pub fn drop_guard(_guard: Guard) {}
 
 // CHECK-LABEL: @no_unwind_boundary(
-// CHECK-SAME: personality ptr @rust_eh_personality
+// CHECK-SAME: personality ptr @{{[^ ]*}}rust_eh_personality
 // CHECK-NOT: "ptrauth"
 // CHECK-NOT: ptrauth (ptr
 // CHECK: invoke void @may_unwind()

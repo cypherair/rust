@@ -1,4 +1,4 @@
-// ignore-tidy-linelength
+// ignore-tidy-file-linelength
 // The arm64e ABI fixes pointer authentication on Apple targets, so `-Z pointer-authentication` is
 // an error there rather than an option that is quietly ignored.
 //@ ignore-backends: gcc

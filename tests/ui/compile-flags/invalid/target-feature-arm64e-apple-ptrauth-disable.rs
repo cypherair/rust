@@ -1,4 +1,4 @@
-// ignore-tidy-linelength
+// ignore-tidy-file-linelength
 // `-Ctarget-feature` cannot turn pointer authentication off on arm64e Apple targets, under
 // Rust's feature names or LLVM's.
 //@ ignore-backends: gcc

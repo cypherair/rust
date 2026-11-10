@@ -1,4 +1,4 @@
-// ignore-tidy-linelength
+// ignore-tidy-file-linelength
 // Every function on an arm64e Apple target carries the four attributes that clang's Darwin driver
 // turns on, and none of the ELF PAuth ABI's attributes or module flags.
 //@ add-minicore

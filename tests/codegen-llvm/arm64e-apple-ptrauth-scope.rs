@@ -1,4 +1,4 @@
-// ignore-tidy-linelength
+// ignore-tidy-file-linelength
 // On arm64e Apple targets every function address that becomes a value is signed with key IA and
 // discriminator 0, whatever the function's ABI: function pointers, closures, constants, statics,
 // `extern_weak` statics and v-table entries. Every indirect call authenticates its callee, and

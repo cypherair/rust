@@ -1,4 +1,4 @@
-// ignore-tidy-linelength
+// ignore-tidy-file-linelength
 // arm64e Apple targets sign return addresses through their ABI, so they reject `pac-ret`.
 //@ ignore-backends: gcc
 //@ revisions: DARWIN_PACRET DARWIN_PAUTHLR_LEAF IOS_PACRET IOS_PAUTHLR_LEAF TVOS_PACRET TVOS_PAUTHLR_LEAF VISIONOS_PACRET VISIONOS_PAUTHLR_LEAF
