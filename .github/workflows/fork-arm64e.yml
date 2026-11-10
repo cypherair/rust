@@ -112,17 +112,22 @@ jobs:
             tests/ui/statics/crt-static-pauthtest.rs \
             tests/ui/target_modifiers/incompatible_pauth.rs
 
+      # The steps below do not depend on each other's results: a failing test or tidy check must
+      # not hide the std build or the runtime results. Each failure still fails the job.
       - name: Run tidy
         id: tidy
+        if: ${{ !cancelled() }}
         run: |
           python3 x.py test --stage 1 tidy
 
       - name: Build stage1 arm64e std toolchain
         id: build_stage1
+        if: ${{ !cancelled() && steps.check_codegen.outcome == 'success' }}
         run: |
           python3 x.py build compiler/rustc library/std --stage 1 --target arm64e-apple-darwin
 
       - name: Prepare arm64e smoke helpers
+        if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
         run: |
           mkdir -p /tmp/arm64e-diagnostics
           cat > /tmp/arm64e_collect_smoke.py <<'PY'
@@ -261,6 +266,7 @@ jobs:
 
       - name: Diagnose arm64e hello runtime
         id: hello_diag
+        if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
         continue-on-error: true
         run: |
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
@@ -283,6 +289,7 @@ jobs:
 
       - name: Diagnose arm64e thread id runtime
         id: thread_id_diag
+        if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
         continue-on-error: true
         run: |
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
@@ -305,6 +312,7 @@ jobs:
 
       - name: Diagnose arm64e function pointer runtime
         id: fnptr_diag
+        if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
         continue-on-error: true
         run: |
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
@@ -338,6 +346,7 @@ jobs:
 
       - name: Diagnose arm64e TLS runtime
         id: tls_diag
+        if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
         continue-on-error: true
         run: |
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
@@ -374,6 +383,7 @@ jobs:
 
       - name: Diagnose arm64e pointer-authentication scope runtime
         id: scope_diag
+        if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
         continue-on-error: true
         run: |
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
