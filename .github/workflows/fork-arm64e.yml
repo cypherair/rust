@@ -97,7 +97,7 @@ jobs:
       - name: Run arm64e and pauthtest tests
         id: targeted_tests
         run: |
-          python3 x.py test --stage 1 --force-rerun \
+          python3 x.py test --stage 1 --force-rerun --no-fail-fast \
             tests/codegen-llvm/arm64e-apple-ptrauth*.rs \
             tests/assembly-llvm/arm64e-apple-ptrauth-calls.rs \
             tests/assembly-llvm/targets/targets-macho.rs \
