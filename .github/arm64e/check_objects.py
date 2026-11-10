@@ -92,11 +92,18 @@ def writes(mnemonic, ops):
     return written | set(names[:count])
 
 
-def is_jump_table_dispatch(insns, i):
-    """Whether `br xR` at `insns[i]` dispatches through a jump table, as LLVM emits it: xR was last
-    written by `add xR, xA, xB`, where xA is an `adr` anchor and xB a table entry, loaded within the
-    two instructions before the `add`. The plain form is `adr xR; ldr xB; add xR, xR, xB`, the
-    hardened one `ldrsw x16; adr x17; add x16, x17, x16`."""
+# The table load and the `add` of LLVM's plain dispatch (`LowerJumpTableDest`), by entry size.
+PLAIN_DISPATCH = {
+    "ldrb": (re.compile(r"w(\d+), \[x\d+, x\d+\]"), ", lsl #2"),
+    "ldrh": (re.compile(r"w(\d+), \[x\d+, x\d+, lsl #1\]"), ", lsl #2"),
+    "ldrsw": (re.compile(r"x(\d+), \[x\d+, x\d+, lsl #2\]"), ""),
+}
+
+
+def is_plain_dispatch(insns, i):
+    """Whether `br xR` at `insns[i]` ends LLVM's plain jump-table dispatch: xR was last written,
+    within its block, by `adr xR; ldr{b,h,sw} xS, [xT, xI...]; add xR, xR, xS`. Register copies may
+    stand between the `add` and the `br`."""
     (target,) = operands(insns[i][1])
     for k in range(i - 1, -1, -1):
         mnemonic, ops = insns[k]
@@ -106,14 +113,48 @@ def is_jump_table_dispatch(insns, i):
             return False
     else:
         return False
-    names = operands(ops)
-    if mnemonic != "add" or len(names) < 3 or k < 2:
+    if mnemonic != "add" or k < 2:
         return False
-    anchor, entry = names[1], names[2]
-    window = insns[k - 2 : k]
-    anchored = any(m == "adr" and operands(o)[:1] == [anchor] for m, o in window)
-    loaded = any(m.startswith("ldr") and operands(o)[:1] == [entry] for m, o in window)
-    return anchored and loaded
+    (load, load_ops), (adr, adr_ops) = insns[k - 1], insns[k - 2]
+    if load not in PLAIN_DISPATCH or adr != "adr" or operands(adr_ops)[:1] != [target]:
+        return False
+    pattern, shift = PLAIN_DISPATCH[load]
+    m = pattern.fullmatch(load_ops)
+    return bool(m) and ops == f"{target}, {target}, x{m.group(1)}{shift}"
+
+
+# The hardened jump-table dispatch, as LLVM emits it (`LowerHardenedBRJumpTable`) before its
+# `br x16`, after the bounds check: the index is clamped again, and the table address, the entry and
+# the target never leave x16 and x17.
+HARDENED_DISPATCH = (
+    ("csel", re.compile(r"x16, x16, xzr, ls")),
+    ("adrp", re.compile(r"x17, .*")),
+    ("add", re.compile(r"x17, x17, #.*")),
+    ("ldrsw", re.compile(r"x16, \[x17, x16, lsl #2\]")),
+    ("adr", re.compile(r"x17, .*")),
+    ("add", re.compile(r"x16, x17, x16")),
+)
+IMMEDIATE = r"#(0x)?[0-9a-f]+"
+
+
+def is_hardened_dispatch(insns, i):
+    """Whether the plain `br` at `insns[i]` ends a hardened jump-table dispatch."""
+    n = len(HARDENED_DISPATCH)
+    if insns[i][1] != "x16" or i < n + 1:
+        return False
+    for (mnemonic, ops), (want, pattern) in zip(insns[i - n : i], HARDENED_DISPATCH):
+        if mnemonic != want or not pattern.fullmatch(ops):
+            return False
+    mnemonic, ops = insns[i - n - 1]
+    if mnemonic == "cmp" and re.fullmatch(rf"x16, {IMMEDIATE}", ops):
+        return True
+    # A table too large for `cmp`'s immediate: its size goes into x17 with `mov` and `movk`.
+    if mnemonic != "cmp" or ops != "x16, x17":
+        return False
+    j = i - n - 2
+    while j >= 0 and insns[j][0] == "movk" and insns[j][1].startswith("x17, "):
+        j -= 1
+    return j >= 0 and insns[j][0] == "mov" and re.fullmatch(rf"x17, {IMMEDIATE}", insns[j][1])
 
 
 def context(lines, i):
@@ -129,7 +170,8 @@ def check_code(objdump, obj, problems):
         if m := FUNCTION_HEADER.match(line):
             functions.append((m.group(1), [], []))
         elif (m := INSTRUCTION.match(line)) and functions:
-            functions[-1][1].append((m.group(1), m.group(2)))
+            # Without objdump's comment: `mov x17, #0x1387 ; =4999`.
+            functions[-1][1].append((m.group(1), m.group(2).split(";")[0].strip()))
             functions[-1][2].append(" ".join(line.split()))
     jump_tables = 0
     for name, insns, lines in functions:
@@ -145,7 +187,7 @@ def check_code(objdump, obj, problems):
                 problems.append(
                     f"{obj.name}: {name} calls through a plain blr {ops}{context(lines, i)}"
                 )
-            elif m == "br" and is_jump_table_dispatch(insns, i):
+            elif m == "br" and (is_plain_dispatch(insns, i) or is_hardened_dispatch(insns, i)):
                 jump_tables += 1
             elif m == "br":
                 problems.append(
