@@ -14,9 +14,7 @@ on:
         type: boolean
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 concurrency:
   group: arm64e-stage1-prerelease-${{ github.ref }}
@@ -50,6 +48,7 @@ jobs:
         with:
           fetch-depth: 2
           submodules: recursive
+          persist-credentials: false
 
       # On the default `dev` channel, the compiler accepts unstable features in every crate, calls
       # itself `-dev`, which build scripts take for a nightly, and turns on the next trait solver
@@ -170,13 +169,6 @@ jobs:
           ls -l "$ASSET"
           echo "rustc_version=$("$rustc" -V)" >> "$GITHUB_OUTPUT"
 
-      # Ties the toolchain to this workflow, this run and the commit it built.
-      - name: Attest the toolchain
-        if: inputs.create_release
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: ${{ env.ASSET }}
-
       - name: Upload the toolchain
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -189,6 +181,10 @@ jobs:
     if: github.repository == 'cypherair/rust' && inputs.create_release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     defaults:
       run:
         shell: bash
@@ -200,6 +196,12 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: arm64e-stage1-toolchain
+
+      # Ties the toolchain to this workflow, this run and the commit it built.
+      - name: Attest the toolchain
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ env.ASSET }}
 
       - name: Publish the prerelease
         env:
