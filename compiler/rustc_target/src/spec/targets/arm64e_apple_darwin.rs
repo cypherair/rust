@@ -16,6 +16,7 @@ pub(crate) fn target() -> Target {
             .into(),
         arch,
         options: TargetOptions {
+            features: "+v8.3a,+paca,+pacg".into(),
             mcount: "\u{1}mcount".into(),
             cpu: "apple-m1".into(),
             max_atomic_width: Some(128),
