@@ -1,8 +1,13 @@
 // Indirect calls authenticate with `blraaz` or `braaz`; direct calls do not.
+// Disabling `v8.3a` does not disable `paca` and `pacg`, which it implies: the backend keeps `pauth`
+// and still emits these instructions.
 //@ add-minicore
 //@ assembly-output: emit-asm
-//@ compile-flags: --target arm64e-apple-darwin -Copt-level=2
-//@ needs-llvm-components: aarch64
+//@ revisions: DEFAULT NO_V83A
+//@ [DEFAULT] compile-flags: --target arm64e-apple-darwin -Copt-level=2
+//@ [DEFAULT] needs-llvm-components: aarch64
+//@ [NO_V83A] compile-flags: --target arm64e-apple-darwin -Copt-level=2 -Ctarget-feature=-v8.3a
+//@ [NO_V83A] needs-llvm-components: aarch64
 
 #![crate_type = "lib"]
 #![feature(no_core, lang_items)]
