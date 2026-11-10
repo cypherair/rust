@@ -114,6 +114,7 @@ jobs:
       # A Rust static library in a clang-built host, at -O and -O0, and the object check on the
       # linked hosts.
       - name: Run the app-shape case and check the linked binaries
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           for opt in 2 0; do
