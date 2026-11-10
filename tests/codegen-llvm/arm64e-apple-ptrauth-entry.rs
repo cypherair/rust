@@ -1,4 +1,5 @@
-// The C `main` that rustc generates carries the pointer-authentication attributes too.
+// The C `main` that rustc generates carries the pointer-authentication attributes too, and the
+// pointer to the Rust `main` that it hands to `lang_start` is signed.
 //@ add-minicore
 //@ revisions: DARWIN IOS TVOS VISIONOS
 //@ [DARWIN] compile-flags: --target arm64e-apple-darwin -Copt-level=0
@@ -28,5 +29,6 @@ fn lang_start<T: 'static>(
 fn main() {}
 
 // CHECK: define i32 @main({{.*}}) unnamed_addr [[MAIN_ATTR:#[0-9]+]]
+// CHECK: call {{.*}}@{{.*}}lang_start{{.*}}(ptr ptrauth (ptr @{{.*}}4main{{.*}}, i32 0),
 // CHECK: attributes [[MAIN_ATTR]] = {{.*}} "ptrauth-auth-traps" "ptrauth-calls"
 // CHECK-SAME: "ptrauth-indirect-gotos" "ptrauth-returns"

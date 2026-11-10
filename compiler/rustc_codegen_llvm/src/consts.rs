@@ -15,6 +15,7 @@ use rustc_middle::mir::interpret::{
 use rustc_middle::mono::MonoItem;
 use rustc_middle::ty::layout::{HasTypingEnv, LayoutOf};
 use rustc_middle::ty::{self, Instance};
+use rustc_session::PointerAuthScope;
 use rustc_span::{Symbol, bug, span_bug};
 use rustc_target::spec::Arch;
 use tracing::{debug, instrument, trace};
@@ -213,7 +214,9 @@ fn check_and_apply_linkage<'ll, 'tcx>(
                 let fn_abi = cx.fn_abi_of_fn_ptr(fn_sig, ty::List::empty());
                 // Decide if the initializer needs to be signed
                 if cx.sess().pointer_authentication()
-                    && matches!(fn_sig.abi(), ExternAbi::C { .. } | ExternAbi::System { .. })
+                    && (cx.sess().pointer_authentication_scope()
+                        == Some(PointerAuthScope::AllFunctions)
+                        || matches!(fn_sig.abi(), ExternAbi::C { .. } | ExternAbi::System { .. }))
                 {
                     should_sign = true;
                 }

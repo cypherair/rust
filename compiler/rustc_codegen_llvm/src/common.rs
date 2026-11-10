@@ -15,7 +15,7 @@ use rustc_hir::def::DefKind;
 use rustc_hir::def_id::DefId;
 use rustc_middle::mir::interpret::{GlobalAlloc, PointerArithmetic, Scalar};
 use rustc_middle::ty::{Instance, TyCtxt};
-use rustc_session::{PointerAuthAddressDiscriminator, PointerAuthSchema};
+use rustc_session::{PointerAuthAddressDiscriminator, PointerAuthSchema, PointerAuthScope};
 use rustc_span::bug;
 use tracing::debug;
 
@@ -36,21 +36,23 @@ pub(crate) fn maybe_sign_fn_ptr<'ll, 'tcx>(
         return llfn;
     }
 
-    // Only free functions or methods
-    let def_id = instance.def_id();
-    if !matches!(cx.tcx.def_kind(def_id), DefKind::Fn | DefKind::AssocFn) {
-        return llfn;
-    }
-    // Only C ABI
-    let abi = cx.tcx.fn_sig(def_id).skip_binder().abi();
-    if !matches!(abi, ExternAbi::C { .. } | ExternAbi::System { .. }) {
-        return llfn;
+    if cx.tcx.sess.pointer_authentication_scope() == Some(PointerAuthScope::ExternC) {
+        // Only free functions or methods
+        let def_id = instance.def_id();
+        if !matches!(cx.tcx.def_kind(def_id), DefKind::Fn | DefKind::AssocFn) {
+            return llfn;
+        }
+        // Only C ABI
+        let abi = cx.tcx.fn_sig(def_id).skip_binder().abi();
+        if !matches!(abi, ExternAbi::C { .. } | ExternAbi::System { .. }) {
+            return llfn;
+        }
+        if Some(def_id) == cx.tcx.lang_items().eh_personality() {
+            return llfn;
+        }
     }
     // Ignore LLVM intrinsics
     if llvm::get_value_name(llfn).starts_with(b"llvm.") {
-        return llfn;
-    }
-    if Some(def_id) == cx.tcx.lang_items().eh_personality() {
         return llfn;
     }
 
@@ -398,6 +400,18 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
             let success = llvm::LLVMRustConstInt128Get(v, sign_ext, &mut hi, &mut lo);
             success.then_some(hi_lo_to_u128(lo, hi))
         })
+    }
+
+    fn scalar_to_backend(&self, cv: Scalar, layout: abi::Scalar, llty: &'ll Type) -> &'ll Value {
+        // A function address in a constant operand is a value: sign it if every function pointer
+        // is signed.
+        let schema = match self.tcx.sess.pointer_authentication_scope() {
+            Some(PointerAuthScope::AllFunctions) => {
+                self.tcx.sess.pointer_authentication_functions()
+            }
+            Some(PointerAuthScope::ExternC) | None => None,
+        };
+        self.scalar_to_backend_with_pac(cv, layout, llty, schema)
     }
 
     fn scalar_to_backend_with_pac(

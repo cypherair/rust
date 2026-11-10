@@ -143,7 +143,20 @@ impl PointerAuthSchema {
     }
 }
 
+/// Which function pointers are signed, and which calls authenticate their callee.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerAuthScope {
+    /// Functions with the C or system ABI. Their address is signed wherever codegen takes it, so
+    /// direct calls to them carry a `ptrauth` bundle too, until LLVM folds the pair away.
+    ExternC,
+    /// Every function. An address is signed where it becomes a value: a function pointer, a
+    /// v-table entry, a constant or a static. Every indirect call is authenticated, and direct
+    /// calls stay direct.
+    AllFunctions,
+}
+
 pub struct PointerAuthConfig {
+    pub scope: PointerAuthScope,
     /// Should return addresses be authenticated?
     pub return_addresses: bool,
     /// Do authentication failures cause a trap?
@@ -170,6 +183,7 @@ impl PointerAuthConfig {
     fn default(target: &Target) -> Self {
         assert!(target.cfg_abi == CfgAbi::Pauthtest);
         return Self {
+            scope: PointerAuthScope::ExternC,
             return_addresses: true,
             auth_traps: true,
             indirect_gotos: true,
@@ -184,9 +198,12 @@ impl PointerAuthConfig {
         };
     }
     /// The arm64e ABI of Apple's platforms, as clang's Darwin driver sets it up. C function
-    /// pointers use key IA with no diversity.
+    /// pointers use key IA with no diversity. Rust function pointers and v-table entries use the
+    /// same schema, so that Rust's indirect calls are as protected as those of the C and Swift
+    /// code in the same process.
     fn arm64e_apple(target: &Target) -> Self {
         Self {
+            scope: PointerAuthScope::AllFunctions,
             return_addresses: true,
             auth_traps: true,
             indirect_gotos: true,
@@ -1283,6 +1300,18 @@ impl Session {
 
     pub fn pointer_authentication_functions(&self) -> Option<&PointerAuthSchema> {
         self.pointer_auth_config.as_ref().and_then(|cfg| cfg.function_pointers.as_ref())
+    }
+
+    /// The schema for a function address taken as the callee of a direct call.
+    pub fn pointer_authentication_direct_callees(&self) -> Option<&PointerAuthSchema> {
+        match self.pointer_auth_config.as_ref()?.scope {
+            PointerAuthScope::ExternC => self.pointer_authentication_functions(),
+            PointerAuthScope::AllFunctions => None,
+        }
+    }
+
+    pub fn pointer_authentication_scope(&self) -> Option<PointerAuthScope> {
+        self.pointer_auth_config.as_ref().map(|cfg| cfg.scope)
     }
 
     pub fn pointer_authentication_init_fini(&self) -> Option<&PointerAuthSchema> {

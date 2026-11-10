@@ -1069,6 +1069,7 @@ unsafe extern "C" {
     pub(crate) fn LLVMGetAggregateElement(ConstantVal: &Value, Idx: c_uint) -> Option<&Value>;
     pub(crate) fn LLVMGetConstOpcode(ConstantVal: &Value) -> Opcode;
     pub(crate) fn LLVMIsAConstantExpr(Val: &Value) -> Option<&Value>;
+    pub(crate) safe fn LLVMIsAInlineAsm(Val: &Value) -> Option<&Value>;
 
     // Operations on global variables, functions, and aliases (globals)
     pub(crate) fn LLVMIsDeclaration(Global: &Value) -> Bool;

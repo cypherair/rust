@@ -23,6 +23,7 @@ use rustc_middle::ty::layout::{
 };
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt};
 use rustc_sanitizers::{cfi, kcfi};
+use rustc_session::PointerAuthScope;
 use rustc_session::config::OptLevel;
 use rustc_span::Span;
 use rustc_target::callconv::{FnAbi, PassMode};
@@ -2184,9 +2185,15 @@ impl<'a, 'll, 'tcx> Builder<'a, 'll, 'tcx> {
         if self.sess().pointer_authentication_functions().is_none() {
             return None;
         }
+        let scope = self.sess().pointer_authentication_scope();
+        // When every function pointer is signed and no direct callee is, exactly the indirect
+        // calls authenticate their callee, whatever their ABI.
+        if scope == Some(PointerAuthScope::AllFunctions) && !llvm::is_indirect_callee(llfn) {
+            return None;
+        }
         // Pointer authentication support is currently limited to extern "C" calls; filter out other
         // ABIs.
-        if fn_abi?.conv != CanonAbi::C {
+        if scope == Some(PointerAuthScope::ExternC) && fn_abi?.conv != CanonAbi::C {
             return None;
         }
         // Filter out LLVM intrinsics.

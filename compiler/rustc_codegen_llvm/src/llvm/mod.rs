@@ -510,6 +510,14 @@ pub(crate) fn add_alias<'ll>(
     unsafe { LLVMAddAlias2(module, ty, address_space.0, aliasee, name.as_ptr()) }
 }
 
+/// Whether a call to `callee` goes through a pointer: the callee is neither a function symbol
+/// nor inline assembly.
+pub(crate) fn is_indirect_callee(callee: &Value) -> bool {
+    let callee = unsafe { LLVMRustStripPointerCasts(callee) };
+    let not_a_function_symbol = unsafe { LLVMRustIsNonGVFunctionPointerTy(callee) };
+    not_a_function_symbol && LLVMIsAInlineAsm(callee).is_none()
+}
+
 /// Safe wrapper for `LLVMRustConstPtrAuth`.
 pub(crate) fn const_ptr_auth<'ll>(
     ptr: &'ll Value,
