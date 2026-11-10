@@ -1,12 +1,15 @@
-"""Checks every object in the given rlibs or archives for code that pointer authentication misses.
+"""Checks arm64e code for what pointer authentication misses: every object in the given rlibs or
+archives, or, with `--linked`, linked Mach-O binaries.
 
 Fails on:
 - a function that saves its return address (x30) without signing it with `pacibsp`;
 - an indirect call with a plain `blr`;
 - an indirect branch with a plain `br`, unless it is a jump-table dispatch;
-- a data relocation that stores a function's address unsigned.
+- in an object, a data relocation that stores a function's address unsigned;
+- in a linked binary, a plain rebase (an unsigned pointer) to an address in `__text`.
 
 Usage: check_objects.py LLVM_BIN_DIR ARCHIVE...
+       check_objects.py LLVM_BIN_DIR --linked BINARY...
 """
 
 import pathlib
@@ -28,10 +31,13 @@ UNSIGNED_OK_SECTIONS = {
 }
 
 FUNCTION_HEADER = re.compile(r"^[0-9a-f]+ <(.+)>:$")
-INSTRUCTION = re.compile(r"^\s+[0-9a-f]+:\s+(\S+)\s*(.*)$")
+INSTRUCTION = re.compile(r"^\s*[0-9a-f]+:\s+(\S+)\s*(.*)$")
 SECTION_HEADER = re.compile(r"^RELOCATION RECORDS FOR \[(.+)\]:$")
 RELOCATION = re.compile(r"^[0-9a-f]+\s+(\S+)\s+(\S+)$")
 SYMBOL = re.compile(r"^[0-9a-f]+\s+[lg ]\s+F\s+__TEXT,__text\s+(\S+)$")
+TEXT_SECTION = re.compile(r"^\s*\d+\s+__text\s+([0-9a-f]+)\s+([0-9a-f]+)\s")
+# `dyld_info -fixups`: segment, section, address, kind, target.
+FIXUP = re.compile(r"^\s*(\S+)\s+(\S+)\s+0x[0-9A-Fa-f]+\s+(\S+)\s+(\S+)")
 
 
 def run(tool, *args):
@@ -87,8 +93,52 @@ def check_data(objdump, obj, functions, problems):
     return authenticated
 
 
+def text_range(objdump, binary):
+    for line in run(objdump, "-h", binary).splitlines():
+        if m := TEXT_SECTION.match(line):
+            size, start = int(m.group(1), 16), int(m.group(2), 16)
+            return start, start + size
+    sys.exit(f"{binary}: no __text section")
+
+
+def check_linked(objdump, binary, problems):
+    """Checks a linked binary's code, and dyld's fixups for unsigned pointers to its code."""
+    n_functions = check_code(objdump, binary, problems)
+    start, end = text_range(objdump, binary)
+    authenticated = 0
+    for line in run("dyld_info", "-fixups", binary).splitlines():
+        if not (m := FIXUP.match(line)):
+            continue
+        segment, section, kind, target = m.groups()
+        if kind.startswith("auth-"):
+            authenticated += 1
+        elif kind == "rebase" and section not in UNSIGNED_OK_SECTIONS:
+            address = int(target, 16)
+            if start <= address < end:
+                problems.append(f"{binary.name}: [{segment},{section}] stores {target} unsigned")
+    return n_functions, authenticated
+
+
+def main_linked(objdump, binaries):
+    problems = []
+    n_functions = n_auth = 0
+    for binary in binaries:
+        functions, authenticated = check_linked(objdump, binary, problems)
+        n_functions += functions
+        n_auth += authenticated
+    print(f"{len(binaries)} binaries, {n_functions} functions, "
+          f"{n_auth} authenticated fixups, {len(problems)} problems")
+    for problem in problems[:200]:
+        print(problem)
+    if not n_functions or not n_auth or problems:
+        sys.exit(1)
+
+
 def main():
     llvm_bin = pathlib.Path(sys.argv[1])
+    if sys.argv[2:3] == ["--linked"]:
+        main_linked(llvm_bin / "llvm-objdump", [pathlib.Path(b) for b in sys.argv[3:]])
+        return
     archives = [pathlib.Path(a) for a in sys.argv[2:]]
     objdump, ar = llvm_bin / "llvm-objdump", llvm_bin / "llvm-ar"
     if not archives:
