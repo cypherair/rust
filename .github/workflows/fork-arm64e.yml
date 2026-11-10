@@ -385,7 +385,6 @@ jobs:
       - name: Diagnose arm64e pointer-authentication scope runtime
         id: scope_diag
         if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
-        continue-on-error: true
         run: |
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
 
@@ -448,14 +447,48 @@ jobs:
       - name: Diagnose arm64e unwind runtime
         id: unwind_diag
         if: ${{ !cancelled() && steps.build_stage1.outcome == 'success' }}
-        continue-on-error: true
         run: |
           STAGE1="build/${HOST_TRIPLE}/stage1/bin/rustc"
 
           cat > /tmp/arm64e-diagnostics/arm64e_unwind.rs <<'EOF'
+          use std::hint::black_box;
+          use std::panic::{AssertUnwindSafe, catch_unwind};
+          use std::sync::atomic::{AtomicU32, Ordering};
+
+          static DROPS: AtomicU32 = AtomicU32::new(0);
+
+          struct CountsDrop;
+
+          impl Drop for CountsDrop {
+              fn drop(&mut self) {
+                  DROPS.fetch_add(1, Ordering::SeqCst);
+              }
+          }
+
+          trait Task {
+              fn run(&self);
+          }
+
+          struct Panics;
+
+          impl Task for Panics {
+              fn run(&self) {
+                  // Unwinding runs this frame's cleanup landing pad first.
+                  let _guard = CountsDrop;
+                  panic!("through dyn");
+              }
+          }
+
           fn main() {
-              let caught = std::panic::catch_unwind(|| panic!("caught on purpose")).is_err();
-              println!("caught={caught}");
+              let main = catch_unwind(|| panic!("on the main thread")).is_err();
+              let thread = std::thread::spawn(|| catch_unwind(|| panic!("on a thread")).is_err())
+                  .join()
+                  .unwrap();
+              let task = black_box(Box::new(Panics) as Box<dyn Task + Send>);
+              let dyn_call = catch_unwind(AssertUnwindSafe(|| task.run())).is_err();
+              let join = std::thread::spawn(|| panic!("out of a thread")).join().is_err();
+              let drops = DROPS.load(Ordering::SeqCst);
+              println!("main={main} thread={thread} dyn={dyn_call} join={join} drops={drops}");
           }
           EOF
 
@@ -467,7 +500,7 @@ jobs:
             --json-out /tmp/arm64e-diagnostics/arm64e_unwind.json \
             --emit link \
             --run-binary \
-            --expected-stdout 'caught=true'
+            --expected-stdout 'main=true thread=true dyn=true join=true drops=1'
 
       - name: Upload arm64e diagnostics
         if: always()
@@ -512,8 +545,8 @@ jobs:
           print("- thread_id_diag (non-blocking): ${{ steps.thread_id_diag.outcome }}")
           print("- fnptr_diag (non-blocking): ${{ steps.fnptr_diag.outcome }}")
           print("- tls_diag (non-blocking): ${{ steps.tls_diag.outcome }}")
-          print("- scope_diag (non-blocking): ${{ steps.scope_diag.outcome }}")
-          print("- unwind_diag (non-blocking): ${{ steps.unwind_diag.outcome }}")
+          print("- scope_diag: ${{ steps.scope_diag.outcome }}")
+          print("- unwind_diag: ${{ steps.unwind_diag.outcome }}")
           print()
           print("| case | compile | run | rc/signal | file | stdout | asm hits |")
           print("| --- | --- | --- | --- | --- | --- | --- |")
@@ -542,7 +575,7 @@ jobs:
                   f"{file_output} | {stdout} | {asm_hits} |"
               )
           print()
-          print("The host-binary smoke steps are non-blocking: a runner may not run arm64e binaries, or may run them with pointer authentication off. The tests, tidy and the stage1 build are blocking.")
+          print("The hello, thread_id, fnptr and tls cases are non-blocking diagnostics. The scope and unwind cases, the tests, tidy and the stage1 build are blocking.")
           PY
 
           {
