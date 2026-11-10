@@ -51,6 +51,68 @@ def function_symbols(objdump, obj):
     return {m.group(1) for line in lines if (m := SYMBOL.match(line))}
 
 
+def register(operand):
+    """`w9` and `x9` are one register."""
+    operand = operand.strip()
+    return "x" + operand[1:] if re.fullmatch(r"w\d+", operand) else operand
+
+
+def operands(ops):
+    """The operands before any memory operand: `ldp x9, x10, [sp]` gives `x9` and `x10`."""
+    return [register(o) for o in ops.split("[")[0].split(",") if o.strip()]
+
+
+# Instructions that write no register named in their operands.
+NO_DESTINATION = re.compile(
+    r"^(b|b\..*|bl|blr.*|br.*|cbn?z|tbn?z|ret.*|eret.*|cmp|cmn|tst|f?ccmp|ccmn|fcmpe?|nop|"
+    r"prfu?m|dmb|dsb|isb|hint|brk|udf|msr|sys|bti|clrex|yield|wf[ei]|sevl?|csdb)$"
+)
+STORE = re.compile(r"^st(?!l?xr|l?xp)")  # store-exclusives write their status register
+WRITEBACK = re.compile(r"\[(x\d+|sp)(?:,[^\]]*)?\]!|\[(x\d+|sp)\],")
+# A call may leave anything in the caller-saved registers.
+CALL = re.compile(r"^(bl|blr.*)$")
+CALL_CLOBBERED = {f"x{n}" for n in range(19)} | {"x30"}
+NO_FALLTHROUGH = re.compile(r"^(b|br.*|ret.*|brk|udf)$")
+
+
+def writes(mnemonic, ops):
+    """The registers an instruction writes."""
+    if CALL.match(mnemonic):
+        return CALL_CLOBBERED
+    written = set()
+    if m := WRITEBACK.search(ops):
+        written.add(m.group(1) or m.group(2))
+    if NO_DESTINATION.match(mnemonic) or STORE.match(mnemonic):
+        return written
+    names = operands(ops)
+    count = 2 if mnemonic in ("ldp", "ldnp", "ldpsw", "ldxp", "ldaxp") else 1
+    return written | set(names[:count])
+
+
+def is_jump_table_dispatch(insns, i):
+    """Whether `br xR` at `insns[i]` dispatches through a jump table, as LLVM emits it: xR was last
+    written by `add xR, xA, xB`, where xA is an `adr` anchor and xB a table entry, loaded within the
+    two instructions before the `add`. The plain form is `adr xR; ldr xB; add xR, xR, xB`, the
+    hardened one `ldrsw x16; adr x17; add x16, x17, x16`."""
+    (target,) = operands(insns[i][1])
+    for k in range(i - 1, -1, -1):
+        mnemonic, ops = insns[k]
+        if target in writes(mnemonic, ops):
+            break
+        if NO_FALLTHROUGH.match(mnemonic):
+            return False
+    else:
+        return False
+    names = operands(ops)
+    if mnemonic != "add" or len(names) < 3 or k < 2:
+        return False
+    anchor, entry = names[1], names[2]
+    window = insns[k - 2 : k]
+    anchored = any(m == "adr" and operands(o)[:1] == [anchor] for m, o in window)
+    loaded = any(m.startswith("ldr") and operands(o)[:1] == [entry] for m, o in window)
+    return anchored and loaded
+
+
 def check_code(objdump, obj, problems):
     functions = []
     for line in run(objdump, "-d", "--no-show-raw-insn", obj).splitlines():
@@ -69,7 +131,7 @@ def check_code(objdump, obj, problems):
         for i, (m, ops) in enumerate(insns):
             if m == "blr":
                 problems.append(f"{obj.name}: {name} calls through a plain blr {ops}")
-            elif m == "br" and "adr" not in mnemonics[max(0, i - 6) : i]:
+            elif m == "br" and not is_jump_table_dispatch(insns, i):
                 problems.append(f"{obj.name}: {name} branches through a plain br {ops}")
     return len(functions)
 
