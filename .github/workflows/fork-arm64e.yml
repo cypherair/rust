@@ -115,7 +115,7 @@ jobs:
         run: |
           python3 x.py test --stage 1 --force-rerun --no-fail-fast \
             tests/codegen-llvm/arm64e-apple-ptrauth*.rs \
-            tests/assembly-llvm/arm64e-apple-ptrauth-calls.rs \
+            tests/assembly-llvm/arm64e-apple-ptrauth*.rs \
             tests/assembly-llvm/targets/targets-macho.rs \
             tests/ui/compile-flags/invalid/branch-protection-arm64e-apple-pac-ret.rs \
             tests/ui/compile-flags/invalid/target-feature-arm64e-apple-ptrauth-disable.rs \
