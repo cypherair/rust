@@ -14,7 +14,7 @@
 //@ [VISIONOS] needs-llvm-components: aarch64
 
 #![crate_type = "lib"]
-#![feature(no_core, lang_items)]
+#![feature(no_core)]
 #![no_core]
 
 extern crate minicore;
