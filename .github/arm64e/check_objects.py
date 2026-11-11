@@ -4,12 +4,12 @@ archives, or, with `--linked`, linked Mach-O binaries.
 Fails on:
 - a function that saves its return address (x30) without signing it with `pacibsp`;
 - an indirect call with a plain `blr`;
-- an indirect branch with a plain `br`, unless it is a jump-table dispatch;
+- an indirect branch with a plain `br`, unless it ends LLVM's hardened jump-table dispatch;
 - in an object, a data relocation that stores a function's address unsigned;
 - in a linked binary, a plain rebase (an unsigned pointer) to an address in `__text`.
 
-Prints, per archive or binary, how many plain `br` it accepted as jump-table dispatches, and the
-instructions around each branch it rejects.
+Prints, per archive or binary, how many plain `br` it accepted as hardened jump-table dispatches,
+and the instructions around each branch it rejects.
 
 Usage: check_objects.py LLVM_BIN_DIR ARCHIVE...
        check_objects.py LLVM_BIN_DIR --linked BINARY...
@@ -54,61 +54,6 @@ def function_symbols(objdump, obj):
     return {m.group(1) for line in lines if (m := SYMBOL.match(line))}
 
 
-def register(operand):
-    """`w9` and `x9` are one register."""
-    operand = operand.strip()
-    return "x" + operand[1:] if re.fullmatch(r"w\d+", operand) else operand
-
-
-def operands(ops):
-    """The operands before any memory operand: `ldp x9, x10, [sp]` gives `x9` and `x10`."""
-    return [register(o) for o in ops.split("[")[0].split(",") if o.strip()]
-
-
-# Register instructions that write no register named in their operands.
-NO_DESTINATION = re.compile(r"^(cmp|cmn|tst|f?ccmp|ccmn|fcmpe?|nop|hint|msr|bti|csdb)$")
-# Branches and calls, conditional or not: each ends a basic block or leaves it.
-BRANCH = re.compile(r"^(b|b\..*|bl|blr.*|br.*|cbn?z|tbn?z|ret.*|eret.*|brk|udf)$")
-
-
-def writes(mnemonic, ops):
-    """The register that a register instruction writes: its first operand, if it has one."""
-    return set() if NO_DESTINATION.match(mnemonic) else set(operands(ops)[:1])
-
-
-# The table load and the `add` of LLVM's plain dispatch (`LowerJumpTableDest`), by entry size.
-PLAIN_DISPATCH = {
-    "ldrb": (re.compile(r"w(\d+), \[x\d+, x\d+\]"), ", lsl #2"),
-    "ldrh": (re.compile(r"w(\d+), \[x\d+, x\d+, lsl #1\]"), ", lsl #2"),
-    "ldrsw": (re.compile(r"x(\d+), \[x\d+, x\d+, lsl #2\]"), ""),
-}
-
-
-def is_plain_dispatch(insns, i):
-    """Whether `br xR` at `insns[i]` ends LLVM's plain jump-table dispatch: xR was last written,
-    within its block, by `adr xR; ldr{b,h,sw} xS, [xT, xI...]; add xR, xR, xS`. Register copies may
-    stand between the `add` and the `br`."""
-    (target,) = operands(insns[i][1])
-    for k in range(i - 1, -1, -1):
-        mnemonic, ops = insns[k]
-        # Only register instructions stand between LLVM's `add` and its `br`. A branch, a call or
-        # any access to memory (which may write a register, as `swp` and `casp` do) rejects it.
-        if BRANCH.match(mnemonic) or "[" in ops:
-            return False
-        if target in writes(mnemonic, ops):
-            break
-    else:
-        return False
-    if mnemonic != "add" or k < 2:
-        return False
-    (load, load_ops), (adr, adr_ops) = insns[k - 1], insns[k - 2]
-    if load not in PLAIN_DISPATCH or adr != "adr" or operands(adr_ops)[:1] != [target]:
-        return False
-    pattern, shift = PLAIN_DISPATCH[load]
-    m = pattern.fullmatch(load_ops)
-    return bool(m) and ops == f"{target}, {target}, x{m.group(1)}{shift}"
-
-
 # The hardened jump-table dispatch, as LLVM emits it (`LowerHardenedBRJumpTable`) before its
 # `br x16`, after the bounds check: the index is clamped again, and the table address, the entry and
 # the target never leave x16 and x17.
@@ -150,7 +95,7 @@ def context(lines, i):
 
 
 def check_code(objdump, obj, problems):
-    """Returns the number of functions, and of plain `br` accepted as jump-table dispatches."""
+    """Returns the number of functions, and of plain `br` accepted as hardened dispatches."""
     functions = []
     for line in run(objdump, "-d", "--no-show-raw-insn", obj).splitlines():
         if m := FUNCTION_HEADER.match(line):
@@ -173,7 +118,7 @@ def check_code(objdump, obj, problems):
                 problems.append(
                     f"{obj.name}: {name} calls through a plain blr {ops}{context(lines, i)}"
                 )
-            elif m == "br" and (is_plain_dispatch(insns, i) or is_hardened_dispatch(insns, i)):
+            elif m == "br" and is_hardened_dispatch(insns, i):
                 jump_tables += 1
             elif m == "br":
                 problems.append(
