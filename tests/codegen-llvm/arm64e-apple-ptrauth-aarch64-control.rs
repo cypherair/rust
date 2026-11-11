@@ -1,6 +1,7 @@
 // The plain arm64 Apple targets keep upstream's behaviour: no pointer-authentication attributes,
-// no signed function pointers and no `ptrauth` bundles.
+// no jump-table hardening, no signed function pointers and no `ptrauth` bundles.
 //@ add-minicore
+//@ filecheck-flags: --implicit-check-not=aarch64-jump-table-hardening
 //@ revisions: AARCH64_DARWIN AARCH64_IOS AARCH64_VISIONOS
 //@ [AARCH64_DARWIN] compile-flags: --target aarch64-apple-darwin -Copt-level=0
 //@ [AARCH64_DARWIN] needs-llvm-components: aarch64

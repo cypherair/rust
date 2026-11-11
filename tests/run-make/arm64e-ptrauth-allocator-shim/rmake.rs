@@ -6,7 +6,8 @@
 
 use run_make_support::{llvm_dis, rfs, rustc};
 
-const PTRAUTH_ATTRS: [&str; 4] = [
+const PTRAUTH_ATTRS: [&str; 5] = [
+    "\"aarch64-jump-table-hardening\"",
     "\"ptrauth-auth-traps\"",
     "\"ptrauth-calls\"",
     "\"ptrauth-indirect-gotos\"",

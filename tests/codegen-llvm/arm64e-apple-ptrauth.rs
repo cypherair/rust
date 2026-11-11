@@ -1,8 +1,8 @@
 // ignore-tidy-file-linelength
 // Every function on an arm64e Apple target carries the four attributes that clang's Darwin driver
-// turns on, and none of the ELF PAuth ABI's attributes or module flags.
+// turns on, and jump-table hardening, which Apple's LLVM applies to every arm64e function. None of
+// the ELF PAuth ABI's attributes or module flags.
 //@ add-minicore
-//@ filecheck-flags: --implicit-check-not=aarch64-jump-table-hardening
 //@ filecheck-flags: --implicit-check-not=aarch64-elf-pauthabi --implicit-check-not=ptrauth-elf-got
 //@ filecheck-flags: --implicit-check-not=ptrauth-sign-personality
 //@ filecheck-flags: --implicit-check-not=ptrauth.abi-version
@@ -30,7 +30,7 @@ extern crate minicore;
 #[unsafe(no_mangle)]
 pub fn test() {}
 
-// CHECK: attributes [[ATTR]] = {{.*}} "ptrauth-auth-traps" "ptrauth-calls" "ptrauth-indirect-gotos" "ptrauth-returns"
+// CHECK: attributes [[ATTR]] = {{.*}} "aarch64-jump-table-hardening" {{.*}}"ptrauth-auth-traps" "ptrauth-calls" "ptrauth-indirect-gotos" "ptrauth-returns"
 // CHECK-SAME: "target-features"="{{.*}}+pauth{{.*}}"
 // DARWIN_BTI: !{{[0-9]+}} = !{i32 8, !"branch-target-enforcement", i32 1}
 // DARWIN_GCS: !{{[0-9]+}} = !{i32 8, !"guarded-control-stack", i32 1}
